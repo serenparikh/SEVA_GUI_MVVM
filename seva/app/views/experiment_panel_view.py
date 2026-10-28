@@ -78,6 +78,7 @@ class ExperimentPanelView(ttk.Frame):
         self._vars: Dict[str, tk.StringVar] = {}
         self._flag_vars: Dict[str, tk.BooleanVar] = {}
         self._mode_frames: Dict[str, ttk.Labelframe] = {}
+        self._field_defaults: Dict[str, str] = {}
 
         # --- Layout -----------------------------------------------------
         self.columnconfigure(0, weight=1)
@@ -95,6 +96,7 @@ class ExperimentPanelView(ttk.Frame):
         self._make_labeled_entry(cv, "Final vs. Ref (V)", "cv.final_v", 3)
         self._make_labeled_entry(cv, "Scan Rate (V/s)", "cv.scan_rate_v_s", 4)
         self._make_labeled_entry(cv, "Cycle Count", "cv.cycles", 5)
+        self._make_labeled_entry(cv, "Sampling Rate (Hz)", "cv.sampling_rate_hz", 6, default="100")
         self._register_flag("run_cv", self.cv_run_var)
 
         # DC/AC
@@ -222,7 +224,9 @@ class ExperimentPanelView(ttk.Frame):
         ttk.Button(right, text="⎘", width=3, command=on_copy).pack(side="right")
         ttk.Button(right, text="🗀", width=3, command=on_paste).pack(side="right")
 
-    def _make_labeled_entry(self, parent: tk.Widget, label: str, field_id: str, row: int) -> None:
+    def _make_labeled_entry(
+        self, parent: tk.Widget, label: str, field_id: str, row: int, default: str = ""
+    ) -> None:
         """Create one labeled entry and bind variable trace to ``on_change``.
 
         Args:
@@ -230,9 +234,13 @@ class ExperimentPanelView(ttk.Frame):
             label: User-facing label text.
             field_id: Field identifier emitted to ``on_change``.
             row: Grid row index in the section frame.
+            default: Initial value, and the value restored by ``clear_fields()``
+                for a well with no saved snapshot (e.g. a conventional default
+                sampling rate so it doesn't need retyping every time).
         """
         ttk.Label(parent, text=label).grid(row=row, column=0, padx=6, pady=2, sticky="w")
-        var = tk.StringVar(); self._vars[field_id] = var
+        self._field_defaults[field_id] = default
+        var = tk.StringVar(value=default); self._vars[field_id] = var
         ent = ttk.Entry(parent, textvariable=var); ent.grid(row=row, column=1, padx=6, pady=2, sticky="ew")
         parent.columnconfigure(1, weight=1)
         def _on_var_changed(*_):
@@ -348,8 +356,8 @@ class ExperimentPanelView(ttk.Frame):
 
     def clear_fields(self) -> None:
         """Reset all text and boolean inputs to defaults."""
-        for var in self._vars.values():
-            var.set("")
+        for field_id, var in self._vars.items():
+            var.set(self._field_defaults.get(field_id, ""))
         for var in self._flag_vars.values():
             var.set(False)
 

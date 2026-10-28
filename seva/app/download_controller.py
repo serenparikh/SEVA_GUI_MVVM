@@ -73,7 +73,7 @@ class DownloadController:
                 group_id,
                 results_dir,
                 storage_meta,
-                cleanup="archive",
+                cleanup="delete",
             )  # type: ignore[misc]
             self._log.info("Downloaded group %s to %s", group_id, out_dir)
             resolved_dir = os.path.abspath(out_dir)

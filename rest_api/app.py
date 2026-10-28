@@ -1344,6 +1344,13 @@ def _run_slot_sequence(
             filename = f"{filename_base}.csv"
 
             params = dict(req.params_by_mode.get(mode, {}) or {})
+            # Mode-level override (currently only CV sets this) takes
+            # precedence over the job-wide default; pop it so it never
+            # reaches pyBEEP's per-mode parameter validation.
+            mode_sampling_interval = params.pop("sampling_interval", None)
+            effective_sampling_interval = (
+                mode_sampling_interval if mode_sampling_interval is not None else req.sampling_interval
+            )
 
             # Measurement with abort window in background thread
             measurement_error: Optional[Exception] = None
@@ -1355,7 +1362,7 @@ def _run_slot_sequence(
                         mode=mode,
                         params=params,
                         tia_gain=req.tia_gain,
-                        sampling_interval=req.sampling_interval,
+                        sampling_interval=effective_sampling_interval,
                         filename=filename,
                         folder=str(mode_dir),
                     )

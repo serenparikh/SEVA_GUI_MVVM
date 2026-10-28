@@ -240,7 +240,7 @@ class RunFlowCoordinator:
                     group_key,
                     results_dir,
                     storage_meta,
-                    cleanup="archive",
+                    cleanup="delete",
                 )
             except Exception as exc:  # pragma: no cover - defensive guard
                 message = str(exc) or exc.__class__.__name__

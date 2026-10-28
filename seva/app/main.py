@@ -557,6 +557,11 @@ class App:
                 self.experiment.set_editing_well(wid)
             except Exception:
                 pass
+            # Debug aid: show which physical device slot this button maps to.
+            adapter = self.controller.job_adapter
+            if adapter is not None:
+                label = adapter.describe_well(wid)
+                print(f"[well-select] {wid} -> {label or 'no device mapping yet'}")
             # Flatten grouped snapshot and set
             params = self.experiment_vm.get_params_for(wid)
             if params:
@@ -567,16 +572,29 @@ class App:
 
     def _on_apply_params(self) -> None:
         """Persist current form values into each selected well snapshot.
+
+        A well is only marked "configured" when it actually has an active
+        mode saved. Unchecking every mode (e.g. Run CV) and applying clears
+        the well's configured/highlighted state instead of leaving it stuck.
         """
         selection = self.plate_vm.get_selection()
         if not selection:
             self.win.show_toast("No wells selected.")
             return
-        # Save grouped per well (only active modes)
+        # Save grouped per well (only active modes); save_params_for drops
+        # the snapshot entirely when no mode is active.
         for wid in selection:
             self.experiment_vm.save_params_for(wid, self.experiment_vm.fields)
-        self.plate_vm.mark_configured(selection)
-        self.wellgrid.add_configured_wells(selection)
+
+        now_configured = {wid for wid in selection if self.experiment_vm.get_params_for(wid)}
+        now_unconfigured = selection - now_configured
+
+        if now_configured:
+            self.plate_vm.mark_configured(now_configured)
+            self.wellgrid.add_configured_wells(now_configured)
+        if now_unconfigured:
+            self.plate_vm.clear_configured(now_unconfigured)
+            self.wellgrid.clear_configured_wells(now_unconfigured)
         self.win.show_toast("Parameters applied.")
 
     def _on_reset_well_config(self) -> None:

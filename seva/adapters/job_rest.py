@@ -703,6 +703,22 @@ class JobRestAdapter(JobPort):
         """
         return f"slot{slot:02d}"
 
+    def describe_well(self, well_id: str) -> Optional[str]:
+        """Return a human-readable "Box <box> <slot>" label for a well.
+
+        Args:
+            well_id: Grid well identifier (e.g. "A2").
+
+        Returns:
+            Formatted label, or ``None`` when the well has no known device
+            mapping (e.g. the registry predates that device's discovery).
+        """
+        slot_info = self.well_to_slot.get(well_id)
+        if not slot_info:
+            return None
+        box, slot = slot_info
+        return f"Box {box} {self._slot_label(slot)}"
+
     def _store_run_snapshot(self, snapshot: Dict[str, Any]) -> None:
         """Store run snapshot and update terminal tracking.
 
