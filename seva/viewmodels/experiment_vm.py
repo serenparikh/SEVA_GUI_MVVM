@@ -111,8 +111,9 @@ class ExperimentVM:
     def build_mode_snapshot_for_copy(self, mode: str) -> Dict[str, str]:
         """Build a mode-limited copy snapshot from the live form store.
 
-        Call chain:
-            ``App._on_copy_mode`` -> ``ExperimentVM.build_mode_snapshot_for_copy``.
+        Not currently called from the composition root (the per-section
+        copy/paste buttons that triggered this were removed from the view);
+        kept as public ViewModel API for a future UI entry point.
 
         Args:
             mode: Mode token handled by ``ModeRegistry``.
@@ -179,8 +180,8 @@ class ExperimentVM:
     ) -> None:
         """Copy mode-specific values into the mode clipboard.
 
-        Call chain:
-            ``App._on_copy_mode`` -> ``ExperimentVM.cmd_copy_mode``.
+        Not currently called from the composition root (see
+        ``build_mode_snapshot_for_copy``).
 
         Args:
             mode: Mode token used to select clipboard and fields.
@@ -220,8 +221,8 @@ class ExperimentVM:
     def cmd_paste_mode(self, mode: str, well_ids: Iterable[WellId]) -> None:
         """Paste one mode clipboard into each target well snapshot.
 
-        Call chain:
-            ``App._on_paste_mode`` -> ``ExperimentVM.cmd_paste_mode``.
+        Not currently called from the composition root (see
+        ``build_mode_snapshot_for_copy``).
 
         Args:
             mode: Mode token selecting clipboard and grouping behavior.

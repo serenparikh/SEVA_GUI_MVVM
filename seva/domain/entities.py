@@ -229,8 +229,12 @@ class PlanMeta:
     """Deterministic group identifier allocated for this plan."""
     make_plot: Optional[bool] = False
     """Whether the backend should generate plots for each run."""
-    tia_gain: Optional[int] = None
-    """Optional transimpedance amplifier gain override."""
+    tia_gain: Optional[int] = 0
+    """Transimpedance amplifier gain code (pyBEEP GAIN table: 0="1K" .. 4="10M").
+    Defaults to 0 ("1K"), the widest current range, so conventional CV currents
+    don't saturate; previously defaulting to None left the device's gain
+    unconfigured (whatever it was last set to) since pyBEEP only sends
+    SET_TIA_GAIN when a value is given."""
     sampling_interval: Optional[float] = None
     """Optional sampling interval override supplied by the client."""
 

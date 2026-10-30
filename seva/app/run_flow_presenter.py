@@ -304,13 +304,11 @@ class RunFlowPresenter:
         if self.progress_vm.active_group_id == group_id:
             self.runs_vm.set_active_group(group_id)
             self._active_group_id = group_id
-            self.win.set_run_group_id(group_id)
             return
 
         self.runs_vm.set_active_group(group_id)
         self.progress_vm.set_active_group(group_id, self.runs)
         self._active_group_id = group_id
-        self.win.set_run_group_id(group_id)
 
     def on_runs_open_folder(self, group_id: str) -> None:
         """Open downloaded results folder for a selected group if available.
@@ -383,7 +381,6 @@ class RunFlowPresenter:
             self.progress_vm.set_active_group(None, self.runs)
         if self._active_group_id == group_id:
             self._active_group_id = next(iter(self._sessions), None)
-            self.win.set_run_group_id(self._active_group_id or "")
         self._refresh_runs_panel()
 
     # ------------------------------------------------------------------
@@ -519,7 +516,12 @@ class RunFlowPresenter:
             self._toast_error(exc)
 
     def cancel_selected_runs(self) -> None:
-        """Cancel only runs that correspond to currently selected wells."""
+        """Cancel only runs that correspond to currently selected wells.
+
+        Not currently called from the composition root (the "End Selection"
+        button that triggered this was removed from the view); kept as
+        public presenter API for a future UI entry point.
+        """
         selection = sorted(self.plate_vm.get_selection())
         if not selection:
             self.win.show_toast("Select at least one well.")
@@ -572,7 +574,6 @@ class RunFlowPresenter:
         self._sessions.pop(group_id, None)
         if self._active_group_id == group_id:
             self._active_group_id = next(iter(self._sessions), None)
-            self.win.set_run_group_id(self._active_group_id or "")
 
     def start_activity_polling(self) -> None:
         """Start adaptive device-activity polling across configured boxes."""
@@ -696,7 +697,6 @@ class RunFlowPresenter:
         self.runs.unregister_runtime(group_id)
         if self._active_group_id == group_id:
             self._active_group_id = next(iter(self._sessions), None)
-            self.win.set_run_group_id(self._active_group_id or "")
         self._refresh_runs_panel()
 
     def _on_group_started(self, group_id: str, ctx: GroupContext) -> None:
@@ -851,7 +851,6 @@ class RunFlowPresenter:
             group_id: Group id to activate, or ``None``.
         """
         self._active_group_id = group_id
-        self.win.set_run_group_id(group_id or "")
         self.runs_vm.set_active_group(group_id)
         self.progress_vm.set_active_group(group_id, self.runs)
         if self.runs_panel and group_id:

@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, Iterable, Optional, Sequence, Set
 
+from seva.app.views import view_utils
 
 WellId = str
 BoxId = str
@@ -35,6 +36,7 @@ class WellGridView(ttk.Frame):
         on_reset_selected: OnVoid = None,
         on_reset_all: OnVoid = None,
         on_open_plot: OnWell = None,
+        on_electrode_mode_changed: Optional[Callable[[str], None]] = None,
     ) -> None:
         """Construct grid view and bind callbacks.
 
@@ -49,8 +51,9 @@ class WellGridView(ttk.Frame):
             on_reset_selected: Context menu reset callback for selected wells.
             on_reset_all: Toolbar callback for resetting all wells.
             on_open_plot: Double-click/context callback for per-well plotting.
+            on_electrode_mode_changed: Callback receiving normalized ``2E/3E``.
         """
-        super().__init__(parent)
+        super().__init__(parent, style="CardPlain.TFrame")
 
         self._boxes = list(boxes)
         self._wells_per_box = int(wells_per_box)
@@ -61,6 +64,8 @@ class WellGridView(ttk.Frame):
         self._on_reset_selected = on_reset_selected
         self._on_reset_all = on_reset_all
         self._on_open_plot = on_open_plot
+        self._on_electrode_mode_changed = on_electrode_mode_changed
+        self._electrode_display = tk.StringVar(value="3-electrode")
 
         # State
         self._buttons: Dict[WellId, tk.Button] = {}
@@ -74,41 +79,53 @@ class WellGridView(ttk.Frame):
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         """Build toolbar and box/well button matrix."""
-        toolbar = ttk.Frame(self)
+        toolbar = ttk.Frame(self, style="CardPlain.TFrame")
         toolbar.pack(fill="x", pady=(0, 4))
+        # Three equal-weight columns so the two reset buttons and the
+        # electrode-mode dropdown are evenly spaced across the full width.
+        for col in range(3):
+            toolbar.columnconfigure(col, weight=1)
 
         ttk.Button(
             toolbar,
             text="Reset Well Config",
             command=self._on_reset_selected,
-        ).pack(side="left")
+        ).grid(row=0, column=0, sticky="w")
         ttk.Button(
             toolbar,
             text="Reset all Wells",
             command=self._on_reset_all,
-        ).pack(side="left", padx=(6, 0))
+        ).grid(row=0, column=1, sticky="")
 
-        grid = ttk.Frame(self)
+        mode_frame = ttk.Frame(toolbar, style="CardPlain.TFrame")
+        mode_frame.grid(row=0, column=2, sticky="e")
+        ttk.Label(mode_frame, text="Electrode Mode:", style="CardMuted.TLabel").pack(side="left", padx=(0, 6))
+        self._mode_combo = ttk.Combobox(
+            mode_frame, textvariable=self._electrode_display,
+            state="readonly", values=["3-electrode", "2-electrode"], width=13,
+        )
+        self._mode_combo.pack(side="left")
+        self._mode_combo.bind("<<ComboboxSelected>>", lambda e: self._emit_electrode_mode())
+
+        # Borderless: the Plate Labelframe (see main_window.py) already
+        # draws the card boundary, so this inner frame shouldn't add a
+        # second, redundant border around the box groups.
+        grid = ttk.Frame(self, style="CardPlain.TFrame")
         grid.pack(fill="both", expand=True)
+        for col in range(len(self._boxes)):
+            grid.columnconfigure(col, weight=1)
 
         global_index = 1
         for col, box in enumerate(self._boxes):
-            lf = ttk.Labelframe(grid, text=f"{box}")
-            lf.grid(row=0, column=col, padx=8, pady=6, sticky="n")
+            lf = ttk.Labelframe(grid, text=f"{box}", style="Card.TLabelframe")
+            lf.grid(row=0, column=col, padx=6, pady=4, sticky="n")
             for i in range(1, self._wells_per_box + 1):
                 r = (i - 1) % 5
                 c = 0 if i <= 5 else 1
                 # Well ids are globally indexed (A1..A10, B11..B20, ...).
                 wid = f"{box}{global_index}"
-                btn = tk.Button(
-                    lf,
-                    text=str(global_index),
-                    width=6,
-                    height=2,
-                    relief="groove",
-                    bg=self._color_default(),
-                )
-                btn.grid(row=r, column=c, padx=3, pady=2, sticky="nsew")
+                btn = ttk.Button(lf, text=str(global_index), style=view_utils.well_style_name(selected=False, configured=False))
+                btn.grid(row=r, column=c, padx=2, pady=1, sticky="nsew")
                 btn.bind("<Button-1>", lambda e, w=wid: self._on_click(e, w))
                 btn.bind("<Double-Button-1>", lambda e, w=wid: self._on_open_plot(w))
                 btn.bind("<Button-3>", lambda e, w=wid: self._context_menu(e, w))
@@ -166,6 +183,26 @@ class WellGridView(ttk.Frame):
         self._configured.clear()
         self._repaint_all()
 
+    def set_electrode_mode(self, mode: str) -> None:
+        """Set electrode-mode combobox from normalized token.
+
+        Args:
+            mode: Normalized token (``2E`` or ``3E``).
+        """
+        self._electrode_display.set("2-electrode" if mode == "2E" else "3-electrode")
+
+    def get_electrode_mode(self) -> str:
+        """Return normalized electrode token (``2E`` or ``3E``)."""
+        disp = (self._electrode_display.get() or "").strip()
+        return "2E" if disp.startswith("2") else "3E"
+
+    def _emit_electrode_mode(self) -> None:
+        """Convert display label to normalized token and emit callback."""
+        disp = (self._electrode_display.get() or "").strip()
+        mode = "2E" if disp.startswith("2") else "3E"
+        if self._on_electrode_mode_changed:
+            self._on_electrode_mode_changed(mode)
+
     def get_selection(self) -> Set[WellId]:
         """Return a copy of the current selection set."""
         return set(self._selected)
@@ -181,22 +218,16 @@ class WellGridView(ttk.Frame):
         self._emit_selection()
 
     # ------------------------------------------------------------------
-    # Coloring rules (no run statuses here)
+    # Styling (no run statuses here)
     # ------------------------------------------------------------------
-    def _color_default(self) -> str:
-        """Return default background color for unselected wells."""
-        return "white"  # default idle/empty
-
-    def _color_selected(self) -> str:
-        """Return background color for selected wells."""
-        return "#bbdefb"  # light blue
-
-    def _color_configured(self) -> str:
-        """Return background color for configured wells."""
-        return "#c8e6c9"  # light green
-
     def _apply_style(self, wid: WellId) -> None:
-        """Apply color style for a single well based on current state.
+        """Apply the ttk style for a single well based on current state.
+
+        Background reflects "configured" (has saved params) independently
+        from the border, which reflects "selected" — so a well can show
+        both states at once instead of selection masking configured. Uses
+        one of the four named button styles view_utils registers, rather
+        than per-widget raw colors.
 
         Args:
             wid: Well identifier to repaint.
@@ -204,12 +235,10 @@ class WellGridView(ttk.Frame):
         btn = self._buttons.get(wid)
         if not btn:
             return
-        if wid in self._selected:
-            btn.configure(bg=self._color_selected())
-        elif wid in self._configured:
-            btn.configure(bg=self._color_configured())
-        else:
-            btn.configure(bg=self._color_default())
+        style_name = view_utils.well_style_name(
+            selected=wid in self._selected, configured=wid in self._configured,
+        )
+        btn.configure(style=style_name)
 
     # ------------------------------------------------------------------
     # Selection & helpers
@@ -289,6 +318,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.title("WellGridView Demo")
     root.geometry("980x520")
+    view_utils.apply_theme(root)
 
     grid = WellGridView(
         root,

@@ -57,6 +57,10 @@ from seva.app.discovery_controller import DiscoveryController
 from seva.app.settings_controller import SettingsController
 from seva.app.download_controller import DownloadController
 from seva.app.views.runs_panel_view import RunsPanelView
+from seva.app.views.compact_run_overview_view import CompactRunOverviewView
+from seva.app.views.compact_runs_view import CompactRunsView
+from seva.app.views.run_overview_dialog import RunOverviewDialog
+from seva.app.views.runs_dialog import RunsDialog
 
 # ---- ViewModels ----
 from seva.viewmodels.plate_vm import PlateVM
@@ -90,6 +94,44 @@ if TYPE_CHECKING:
 logging_utils.configure_root()
 
 
+class _RunsPanelForwarder:
+    """Stand-in for RunsPanelView passed to RunFlowPresenter.
+
+    The full RunsPanelView now only exists while RunsDialog is open (Tkinter
+    can't reparent a widget into a new Toplevel), so RunFlowPresenter keeps
+    calling set_rows()/select_group() on this forwarder instead, which fans
+    those calls out to the always-visible compact sidebar view and, when
+    present, the real panel inside the currently open RunsDialog. It also
+    caches the last rows so a freshly opened dialog can be seeded immediately.
+    """
+
+    def __init__(self, compact_view: CompactRunsView, get_dialog) -> None:
+        """Store the compact view and a getter for the current dialog.
+
+        Args:
+            compact_view: Always-visible sidebar summary to update.
+            get_dialog: Zero-arg callable returning the open RunsDialog, or
+                None when no dialog is currently open.
+        """
+        self._compact = compact_view
+        self._get_dialog = get_dialog
+        self.last_rows: list = []
+
+    def set_rows(self, rows) -> None:
+        """Cache rows and forward them to the compact view and open dialog."""
+        self.last_rows = list(rows)
+        self._compact.set_rows(rows)
+        dialog = self._get_dialog()
+        if dialog is not None:
+            dialog.set_rows(rows)
+
+    def select_group(self, group_id) -> None:
+        """Forward a selection change to the open dialog, if any."""
+        dialog = self._get_dialog()
+        if dialog is not None:
+            dialog.select_group(group_id)
+
+
 class App:
     """Composition root that wires UI, orchestration, and adapter dependencies."""
 
@@ -104,7 +146,6 @@ class App:
         # Main window with toolbar callback wiring
         self.win = MainWindowView(
             on_submit=self._on_submit,
-            on_cancel_group=self._on_cancel_group,
             on_save_layout=self._on_save_layout,
             on_load_layout=self._on_load_layout,
             on_open_settings=self._on_open_settings,
@@ -149,6 +190,7 @@ class App:
             on_reset_selected=self._on_reset_well_config,
             on_reset_all=self._on_reset_all_wells,
             on_open_plot=lambda wid: self._open_plot_for_well(wid),
+            on_electrode_mode_changed=self._on_electrode_mode_changed,  # relay-only, not part of REST
         )
         self.wellgrid.pack(fill="both", expand=True)
         self.win.mount_wellgrid(self.wellgrid)
@@ -159,41 +201,36 @@ class App:
             on_toggle_control_mode=None,
             on_apply_params=self._on_apply_params,
             on_end_task=self._on_cancel_group,
-            on_end_selection=self._on_end_selection,
-            on_copy_cv=lambda: self._on_copy_mode("CV"),
-            on_paste_cv=lambda: self._on_paste_mode("CV"),
-            on_copy_dcac=lambda: self._on_copy_mode("DCAC"),
-            on_paste_dcac=lambda: self._on_paste_mode("DCAC"),
-            on_copy_cdl=lambda: self._on_copy_mode("CDL"),
-            on_paste_cdl=lambda: self._on_paste_mode("CDL"),
-            on_copy_eis=lambda: self._on_copy_mode("EIS"),
-            on_paste_eis=lambda: self._on_paste_mode("EIS"),
-            on_electrode_mode_changed=self._on_electrode_mode_changed,  # relay-only, not part of REST
         )
         self.win.mount_experiment_panel(self.experiment)
 
-        self.run_overview = RunOverviewView(
-            self.win.tab_run_overview,
-            boxes=initial_boxes,
-            on_cancel_group=self._on_cancel_group,
-            on_download_group_results=self._on_download_group_results,
-            on_download_box_results=self._on_download_box_results,
-            on_open_plot=self._on_open_plotter,
+        # Full RunOverviewView/RunsPanelView now only exist while their
+        # respective dialogs are open (opened on demand below); the status
+        # rail always shows the compact summaries instead. Caches let a
+        # freshly opened dialog be seeded immediately with current state.
+        self._run_overview_dialog: Optional[RunOverviewDialog] = None
+        self._runs_dialog: Optional[RunsDialog] = None
+        self._last_box_status: Dict[str, dict] = {}
+        self._last_well_rows: list = []
+
+        self.compact_run_overview = CompactRunOverviewView(
+            self.win.run_overview_rail_host,
+            on_view_details=self._on_open_run_overview_dialog,
         )
-        self.win.mount_run_overview(self.run_overview)
+        self.win.mount_run_overview_compact(self.compact_run_overview)
 
         self.activity = ChannelActivityView(
-            self.win.tab_channel_activity, boxes=initial_boxes
+            self.win.activity_rail_host, boxes=initial_boxes
         )
         self.win.mount_channel_activity(self.activity)
 
-        self.runs_panel = RunsPanelView(self.win.tabs)
-        try:
-            # Prefer inserting next to run overview tab for discoverability.
-            idx = self.win.tabs.index(self.win.tab_run_overview) + 1
-            self.win.tabs.insert(idx, self.runs_panel, text="Runs")
-        except Exception:
-            self.win.tabs.add(self.runs_panel, text="Runs")
+        self.compact_runs = CompactRunsView(
+            self.win.runs_rail_host, on_view_all=self._on_open_runs_dialog
+        )
+        self.win.mount_recent_runs(self.compact_runs)
+        self.runs_panel = _RunsPanelForwarder(
+            self.compact_runs, lambda: self._runs_dialog
+        )
 
         # Adapter wiring is lazy because URLs/API keys may be loaded from settings.
         # ---- REST Adapter & UseCases (lazy init after settings) ----
@@ -260,10 +297,9 @@ class App:
             ensure_adapter=self._ensure_adapter,
             toast_error=self._toast_error,
         )
-        self.runs_panel.on_select = self.run_flow.on_runs_select
-        self.runs_panel.on_open = self.run_flow.on_runs_open_folder
-        self.runs_panel.on_cancel = self.run_flow.on_runs_cancel
-        self.runs_panel.on_delete = self.run_flow.on_runs_delete
+        # The forwarder itself needs no on_select/on_open/on_cancel/on_delete
+        # callbacks -- those are wired directly onto the real RunsPanelView
+        # each time RunsDialog is opened (see _on_open_runs_dialog).
         # Initial panel refresh ensures persisted entries are visible before user actions.
         self.run_flow.refresh_runs_panel()
         self.run_flow.configure_runs_registry(Path.home() / ".seva" / "runs_registry.json")
@@ -298,22 +334,25 @@ class App:
         )
 
     def _configured_boxes(self) -> List[str]:
-        """Return configured box identifiers, falling back to defaults."""
-        base_urls = self.settings_vm.api_base_urls or {}
-        boxes = [
-            str(box)
-            for box, url in base_urls.items()
-            if isinstance(url, str) and url.strip()
-        ]
-        if boxes:
-            return sorted(boxes)
+        """Return the boxes shown in the Plate/status rail.
+
+        The dashboard layout always shows all 4 boxes (A-D) so the operator
+        can monitor and queue wells for boxes before they're individually
+        configured with a URL; which boxes actually receive network
+        requests at run-start time is still governed separately by
+        ``settings_vm.api_base_urls``, unaffected by this display list.
+        """
         return list(BOX_IDS)
 
     def _apply_box_configuration(self) -> None:
-        """Update views to reflect the currently configured boxes."""
+        """Update views to reflect the currently configured boxes.
+
+        The full Run Overview only exists while its dialog is open (it's
+        constructed fresh each time with the current box set), so there's
+        nothing to update here for it.
+        """
         boxes = self._configured_boxes()
         self.wellgrid.set_boxes(tuple(boxes))
-        self.run_overview.set_boxes(boxes)
         self.activity.set_boxes(boxes)
 
     # ==================================================================
@@ -336,8 +375,8 @@ class App:
         boxes = tuple(self._configured_boxes())
         self.wellgrid.set_boxes(boxes)
         self.wellgrid.set_selection([])
-        self.experiment.set_editing_well("-")
-        self.experiment.set_electrode_mode("3E")
+        self.win.set_editing_well("-")
+        self.wellgrid.set_electrode_mode("3E")
         # initial empty/idle overview
         self._apply_run_overview({"boxes": {}, "wells": [], "activity": {}})
         self.activity.set_updated_at("")
@@ -353,11 +392,6 @@ class App:
         """Forward toolbar cancel-group action to the run-flow presenter.
         """
         self.run_flow.cancel_active_group()
-
-    def _on_end_selection(self) -> None:
-        """Cancel only the currently selected runs through presenter orchestration.
-        """
-        self.run_flow.cancel_selected_runs()
 
     def _suggest_layout_filename(self) -> str:
         """Return a default layout filename derived from the experiment name."""
@@ -437,7 +471,7 @@ class App:
 
             # Mirror electrode mode from VM into view
             try:
-                self.experiment.set_electrode_mode(self.experiment_vm.electrode_mode)
+                self.wellgrid.set_electrode_mode(self.experiment_vm.electrode_mode)
             except Exception:
                 pass
 
@@ -468,6 +502,53 @@ class App:
         """
         self.settings_controller.open_dialog()
 
+    def _on_open_run_overview_dialog(self) -> None:
+        """Open (or focus) the full Run Overview dialog, seeded with the
+        latest known per-box/per-well state from the compact sidebar.
+        """
+        if self._run_overview_dialog is not None:
+            self._run_overview_dialog.lift()
+            self._run_overview_dialog.focus_set()
+            return
+        boxes = tuple(self._configured_boxes())
+        dialog = RunOverviewDialog(
+            self.win,
+            boxes=boxes,
+            on_cancel_group=self._on_cancel_group,
+            on_download_group_results=self._on_download_group_results,
+            on_download_box_results=self._on_download_box_results,
+            on_open_plot=self._on_open_plotter,
+            on_close=self._on_run_overview_dialog_closed,
+        )
+        for box_id, status in self._last_box_status.items():
+            dialog.update_box_status(box_id, **status)
+        dialog.update_well_rows(self._last_well_rows)
+        self._run_overview_dialog = dialog
+
+    def _on_run_overview_dialog_closed(self) -> None:
+        """Clear the dialog reference so live updates stop targeting it."""
+        self._run_overview_dialog = None
+
+    def _on_open_runs_dialog(self) -> None:
+        """Open (or focus) the full Runs dialog, seeded with the latest rows."""
+        if self._runs_dialog is not None:
+            self._runs_dialog.lift()
+            self._runs_dialog.focus_set()
+            return
+        dialog = RunsDialog(
+            self.win,
+            rows=self.runs_panel.last_rows,
+            on_open=self.run_flow.on_runs_open_folder,
+            on_cancel=self.run_flow.on_runs_cancel,
+            on_delete=self.run_flow.on_runs_delete,
+            on_select=self.run_flow.on_runs_select,
+            on_close=self._on_runs_dialog_closed,
+        )
+        self._runs_dialog = dialog
+
+    def _on_runs_dialog_closed(self) -> None:
+        """Clear the dialog reference so live updates stop targeting it."""
+        self._runs_dialog = None
 
     def _on_open_plotter(self) -> None:
         """Open the standalone data plotter window.
@@ -552,9 +633,9 @@ class App:
 
         if len(sel) == 1:
             wid = next(iter(sel))
-            # Update the "editing well" label in the panel.
+            # Update the "editing well" label in the statusbar.
             try:
-                self.experiment.set_editing_well(wid)
+                self.win.set_editing_well(wid)
             except Exception:
                 pass
             # Debug aid: show which physical device slot this button maps to.
@@ -568,7 +649,7 @@ class App:
                 # View always receives flat fields; VM handles grouped mode storage.
                 self.experiment.set_fields(params)
         else:
-            self.experiment.set_editing_well("–")
+            self.win.set_editing_well("–")
 
     def _on_apply_params(self) -> None:
         """Persist current form values into each selected well snapshot.
@@ -628,77 +709,6 @@ class App:
         self.wellgrid.set_selection([])
         self.win.show_toast("All wells reset.")
 
-    def _mode_label(self, mode: str) -> str:
-        """Return user-facing label text for a normalized mode token.
-
-        Args:
-            mode: Normalized mode token such as ``CV`` or ``EIS``.
-        """
-        return self.experiment_vm.mode_registry.label_for(mode)
-
-    def _on_copy_mode(self, mode: str) -> None:
-        """Copy mode-specific form values from one selected source well.
-
-        Args:
-            mode: Mode token copied from current form values.
-        """
-        selection = self.plate_vm.get_selection()
-        if len(selection) == 0:
-            self.win.show_toast("Select one well to copy.")
-            return
-        if len(selection) > 1:
-            self.win.show_toast("Select exactly one well to copy.")
-            return
-        # Copy is intentionally single-source to keep clipboard semantics deterministic.
-        well_id = next(iter(selection))
-        try:
-            snapshot = self.experiment_vm.build_mode_snapshot_for_copy(mode)
-        except Exception as e:
-            self.win.show_toast(str(e))
-            return
-        if not snapshot:
-            self.win.show_toast("No params in form.")
-            return
-        try:
-            self.experiment_vm.cmd_copy_mode(mode, well_id, source_snapshot=snapshot)
-            self.win.show_toast(f"Copied {self._mode_label(mode)}.")
-        except Exception as e:
-            self.win.show_toast(str(e))
-
-    def _on_paste_mode(self, mode: str) -> None:
-        """Paste mode-specific clipboard values into all selected wells.
-
-        Args:
-            mode: Mode token to paste into selected wells.
-        """
-        selection = self.plate_vm.get_selection()
-        if not selection:
-            self.win.show_toast("No wells selected.")
-            return
-
-        clipboard_attr = {
-            "CV": "clipboard_cv",
-            "DCAC": "clipboard_dcac",
-            "CDL": "clipboard_cdl",
-            "EIS": "clipboard_eis",
-        }.get((mode or "").upper())
-        clipboard = getattr(self.experiment_vm, clipboard_attr, {})
-        if not clipboard:
-            self.win.show_toast("Clipboard empty.")
-            return
-
-        try:
-            self.experiment_vm.cmd_paste_mode(mode, selection)
-        except Exception as e:
-            self.win.show_toast(str(e))
-            return
-
-        # Pasting implicitly configures targets; reflect that in VM and grid styling.
-        self.plate_vm.mark_configured(selection)
-        self.wellgrid.add_configured_wells(selection)
-        self._on_selection_changed(selection)
-        self.win.show_toast(f"Pasted {self._mode_label(mode)}.")
-
     def _on_electrode_mode_changed(self, mode: str) -> None:
         """Apply electrode-mode change to VM first, then relay use case.
 
@@ -713,25 +723,37 @@ class App:
             self.win.show_toast(str(e))
 
     def _apply_run_overview(self, dto: Dict) -> None:
-        """Render presenter-provided run overview DTO into the overview view.
+        """Render presenter-provided run overview DTO into the overview views.
+
+        Updates the always-visible compact sidebar summary and, when the
+        full Run Overview dialog happens to be open, that view too. Also
+        caches the latest state so a freshly opened dialog starts seeded
+        instead of blank.
 
         Args:
             dto: View DTO with box metadata and well table rows.
         """
         boxes = dto.get("boxes", {}) or {}
+        wells = dto.get("wells", []) or []
         # DTO is presenter-owned; this method only adapts shape for concrete widgets.
         for b, meta in boxes.items():
             # subrun may be a CSV string or a list; normalize to CSV for the view
             sub = meta.get("subrun")
             if isinstance(sub, list):
                 sub = ", ".join(sub)
-            self.run_overview.set_box_status(
-                b,
-                phase=meta.get("phase", "Idle"),
-                progress_pct=meta.get("progress", 0),
-                sub_run_id=sub,
-            )
-        self.run_overview.set_well_rows(dto.get("wells", []) or [])
+            status = {
+                "phase": meta.get("phase", "Idle"),
+                "progress_pct": meta.get("progress", 0),
+                "sub_run_id": sub,
+            }
+            self._last_box_status[b] = status
+            if self._run_overview_dialog is not None:
+                self._run_overview_dialog.update_box_status(b, **status)
+
+        self._last_well_rows = wells
+        self.compact_run_overview.set_well_rows(wells)
+        if self._run_overview_dialog is not None:
+            self._run_overview_dialog.update_well_rows(wells)
 
     def _apply_channel_activity(self, mapping: Dict[str, str]) -> None:
         """Render channel activity map and updated-at label in the activity view.

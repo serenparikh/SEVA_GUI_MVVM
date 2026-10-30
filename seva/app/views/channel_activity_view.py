@@ -8,20 +8,14 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from seva.app.views import view_utils
+
 WellId = str  # e.g., "A1"
 BoxId = str   # e.g., "A"
 
 
 class ChannelActivityView(ttk.Frame):
-    """Compact, scrollable, read-only activity matrix."""
-
-    _STATUS_COLORS: Dict[str, str] = {
-        "Idle": "white",
-        "Queued": "#e0f7fa",
-        "Running": "#c8e6c9",
-        "Done": "#bbdefb",
-        "Error": "#ffcdd2",
-    }
+    """Compact, read-only activity matrix sized to fit the status rail."""
 
     def __init__(self, parent: tk.Widget, *, boxes: Sequence[BoxId] = ("A","B","C","D")) -> None:
         """Build matrix tab widgets.
@@ -30,50 +24,25 @@ class ChannelActivityView(ttk.Frame):
             parent: Notebook tab container.
             boxes: Ordered list of box identifiers to render.
         """
-        super().__init__(parent)
+        super().__init__(parent, style="CardPlain.TFrame")
         self._boxes: List[BoxId] = list(boxes)
         self._wells_per_box: int = 10
         self._cells: Dict[WellId, tk.Label] = {}
 
         # Header with last update timestamp
-        header = ttk.Frame(self)
+        header = ttk.Frame(self, style="CardPlain.TFrame")
         header.pack(fill="x", padx=6, pady=(6, 2))
         self._updated_var = tk.StringVar(value="Updated at --:--:--")
-        ttk.Label(header, textvariable=self._updated_var).pack(side="left")
+        ttk.Label(header, textvariable=self._updated_var, style="RailMuted.TLabel").pack(side="left")
 
-        # Scrollable canvas for the matrix
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True, padx=6, pady=(2, 6))
-        wrap.rowconfigure(0, weight=1)
-        wrap.columnconfigure(0, weight=1)
-
-        self._canvas = tk.Canvas(wrap, highlightthickness=0)
-        vbar = ttk.Scrollbar(wrap, orient="vertical", command=self._canvas.yview)
-        hbar = ttk.Scrollbar(wrap, orient="horizontal", command=self._canvas.xview)
-        self._canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
-        self._canvas.grid(row=0, column=0, sticky="nsew")
-        vbar.grid(row=0, column=1, sticky="ns")
-        hbar.grid(row=1, column=0, sticky="ew")
-
-        self._inner = ttk.Frame(self._canvas)
-        self._inner_id = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
-        self._inner.bind("<Configure>", lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
-        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        # The matrix is small and lives in a fixed-width sidebar rail, so it
+        # always fits without scrolling -- a plain frame, no canvas/scrollbars.
+        self._inner = ttk.Frame(self, style="CardPlain.TFrame")
+        self._inner.pack(fill="both", expand=True, padx=6, pady=(2, 6))
 
         self._build_matrix()
 
     # ------------------------------------------------------------------
-    def _on_canvas_configure(self, event):
-        """Keep inner matrix width aligned to visible canvas width.
-
-        Args:
-            event: Tk configure event from the canvas.
-        """
-        # Ensure the inner frame matches canvas width for nicer horizontal behavior
-        bbox = self._canvas.bbox(self._inner_id)
-        if bbox:
-            self._canvas.itemconfigure(self._inner_id, width=event.width)
-
     def _build_matrix(self) -> None:
         """Render one labelframe per box, each with 10 cell widgets and a legend."""
         # cleanup
@@ -83,33 +52,45 @@ class ChannelActivityView(ttk.Frame):
 
         globalindex = 1
         for col, box_id in enumerate(self._boxes):
-            frame = ttk.Labelframe(self._inner, text=f"{box_id}")
-            frame.grid(row=0, column=col, padx=8, pady=6, sticky="n")
+            frame = ttk.Labelframe(self._inner, text=f"{box_id}", style="Rail.TLabelframe")
+            frame.grid(row=0, column=col, padx=3, pady=3, sticky="n")
 
             for i in range(1, self._wells_per_box + 1):
                 row = (i - 1) % 5
                 col2 = 0 if i <= 5 else 1
                 wid = f"{box_id}{globalindex}"
-                cell = tk.Label(frame, text=str(i if box_id == self._boxes[0] else ((col)*10 + i)),
-                                width=4, height=1, relief="groove", bg="white")
-                cell.grid(row=row, column=col2, padx=3, pady=2, sticky="nsew")
+                # No number label: this matrix is a color-coded reference,
+                # not a well picker, so the cell is just a plain swatch.
+                cell = ttk.Label(
+                    frame,
+                    text="",
+                    width=2,
+                    style=view_utils.status_style_name("Idle"),
+                )
+                cell.grid(row=row, column=col2, padx=1, pady=1, sticky="nsew")
                 self._cells[wid] = cell
                 globalindex += 1
 
         self._build_legend(row=1, columnspan=max(len(self._boxes), 1))
 
     def _build_legend(self, *, row: int, columnspan: int) -> None:
-        """Render a color legend below the channel boxes."""
-        legend = ttk.LabelFrame(self._inner, text="Legend")
-        legend.grid(row=row, column=0, columnspan=columnspan, padx=8, pady=(0, 8), sticky="ew")
+        """Render a color legend below the channel boxes.
 
-        for index, (status, color) in enumerate(self._STATUS_COLORS.items()):
-            item = ttk.Frame(legend)
-            item.grid(row=0, column=index, padx=8, pady=6, sticky="w")
+        "Queued" is a real, actively-used well status (cells still render
+        its color via ``status_style_name``), but it's left out of this
+        legend's display so the remaining statuses fit on one line.
+        """
+        legend = ttk.LabelFrame(self._inner, text="Legend", style="Rail.TLabelframe")
+        legend.grid(row=row, column=0, columnspan=columnspan, padx=3, pady=(0, 4), sticky="ew")
 
-            color_box = tk.Label(item, width=2, relief="groove", bg=color)
-            color_box.pack(side="left", padx=(0, 4))
-            ttk.Label(item, text=status).pack(side="left")
+        statuses = [s for s in view_utils.STATUS_COLORS if s != "Queued"]
+        for index, status in enumerate(statuses):
+            item = ttk.Frame(legend, style="CardPlain.TFrame")
+            item.grid(row=0, column=index, padx=4, pady=2, sticky="w")
+
+            color_box = ttk.Label(item, width=1, style=view_utils.status_style_name(status))
+            color_box.pack(side="left", padx=(0, 3))
+            ttk.Label(item, text=status, style="Rail.TLabel").pack(side="left")
 
     # ------------------------------------------------------------------
     def set_boxes(self, boxes: Iterable[BoxId]) -> None:
@@ -131,7 +112,7 @@ class ChannelActivityView(ttk.Frame):
             cell = self._cells.get(wid)
             if not cell:
                 continue
-            cell.configure(bg=self._status_to_color(status))
+            cell.configure(style=view_utils.status_style_name(status))
 
     def set_updated_at(self, text: str) -> None:
         """Update the timestamp label shown above the matrix.
@@ -142,19 +123,10 @@ class ChannelActivityView(ttk.Frame):
         label = (text or "").strip() or "--:--:--"
         self._updated_var.set(f"Updated at {label}")
 
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _status_to_color(status: str) -> str:
-        """Map status token to cell background color.
-
-        Args:
-            status: Status token (for example ``Running`` or ``Error``).
-        """
-        return ChannelActivityView._STATUS_COLORS.get(status, "white")
-
 
 if __name__ == "__main__":
     root = tk.Tk()
+    view_utils.apply_theme(root)
     v = ChannelActivityView(root, boxes=("A","B","C","D"))
     v.pack(fill="both", expand=True)
     v.set_activity({"B11":"Running", "A2":"Error", "B10":"Done"})
