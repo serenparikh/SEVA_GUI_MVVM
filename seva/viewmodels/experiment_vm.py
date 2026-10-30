@@ -168,7 +168,12 @@ class ExperimentVM:
         self.well_params.pop(well_id, None)
 
     def clear_all_params(self) -> None:
-        """Remove all persisted well snapshots from the editor state."""
+        """Remove all persisted well snapshots from the editor state.
+
+        Not currently called from the composition root (the "Reset all
+        Wells" button that triggered this was removed from the view); kept
+        as public ViewModel API for a future UI entry point.
+        """
         self.well_params.clear()
 
     # ---------- Commands ----------

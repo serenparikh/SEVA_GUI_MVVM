@@ -29,11 +29,18 @@ class ChannelActivityView(ttk.Frame):
         self._wells_per_box: int = 10
         self._cells: Dict[WellId, tk.Label] = {}
 
-        # Header with last update timestamp
+        # Header: title + last-update timestamp, drawn inside this view
+        # (not as the host Labelframe's native text=) -- same pattern
+        # CompactRunOverviewView/CompactRunsView use, where the host
+        # Labelframe in main_window.py is given text="".
         header = ttk.Frame(self, style="CardPlain.TFrame")
-        header.pack(fill="x", padx=6, pady=(6, 2))
+        header.pack(fill="x", padx=6, pady=(0, 2))
+        ttk.Label(header, text="CHANNEL ACTIVITY", font=("Segoe UI", 8, "bold")).pack(side="left")
+
+        updated_row = ttk.Frame(self, style="CardPlain.TFrame")
+        updated_row.pack(fill="x", padx=6)
         self._updated_var = tk.StringVar(value="Updated at --:--:--")
-        ttk.Label(header, textvariable=self._updated_var, style="RailMuted.TLabel").pack(side="left")
+        ttk.Label(updated_row, textvariable=self._updated_var, style="RailMuted.TLabel").pack(side="left")
 
         # The matrix is small and lives in a fixed-width sidebar rail, so it
         # always fits without scrolling -- a plain frame, no canvas/scrollbars.
@@ -53,7 +60,7 @@ class ChannelActivityView(ttk.Frame):
         globalindex = 1
         for col, box_id in enumerate(self._boxes):
             frame = ttk.Labelframe(self._inner, text=f"{box_id}", style="Rail.TLabelframe")
-            frame.grid(row=0, column=col, padx=3, pady=3, sticky="n")
+            frame.grid(row=0, column=col, padx=2, pady=3, sticky="n")
 
             for i in range(1, self._wells_per_box + 1):
                 row = (i - 1) % 5
@@ -86,10 +93,10 @@ class ChannelActivityView(ttk.Frame):
         statuses = [s for s in view_utils.STATUS_COLORS if s != "Queued"]
         for index, status in enumerate(statuses):
             item = ttk.Frame(legend, style="CardPlain.TFrame")
-            item.grid(row=0, column=index, padx=4, pady=2, sticky="w")
+            item.grid(row=0, column=index, padx=2, pady=2, sticky="w")
 
             color_box = ttk.Label(item, width=1, style=view_utils.status_style_name(status))
-            color_box.pack(side="left", padx=(0, 3))
+            color_box.pack(side="left", padx=(0, 2))
             ttk.Label(item, text=status, style="Rail.TLabel").pack(side="left")
 
     # ------------------------------------------------------------------

@@ -5,7 +5,7 @@ callbacks. It performs no adapter calls, persistence, or business validation.
 """
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Callable, Optional, Dict
 
 from seva.app.views import view_utils
@@ -54,15 +54,21 @@ class ExperimentPanelView(ttk.Frame):
         self._field_defaults: Dict[str, str] = {}
 
         # --- Layout -----------------------------------------------------
-        # No column weight: cards keep their natural (compact) width
-        # instead of stretching to fill the scroll host, so the grid stays
-        # tight instead of ballooning entries across the full window.
+        # No column/row weight on self: the 2x2 grid as a whole keeps its
+        # natural (compact) size instead of stretching to fill the scroll
+        # host, so entries don't balloon across the full window. Within
+        # that grid, each card uses sticky="nsew" so it fills its own
+        # cell -- and since a grid column's/row's width/height is always
+        # the natural max across every cell in it, this makes CDL match
+        # CV's width (same column), EIS match DCAC's width (same column),
+        # and CV/DCAC match each other's height (same row), all without
+        # hardcoding a size.
 
         # CV
         self.cv_run_var = tk.BooleanVar(value=False)
         cv = ttk.Labelframe(self, text="Cyclic Voltammetry (CV)", style="Card.TLabelframe")
         self._mode_frames["CV"] = cv
-        cv.grid(row=0, column=0, padx=6, pady=6, sticky="nw")
+        cv.grid(row=0, column=0, padx=6, pady=6, sticky="nsew")
         self._make_section_header(cv, check_var=self.cv_run_var, check_text="Run CV")
         self._make_labeled_entry(cv, "Vertex 1 vs. Ref (V)", "cv.vertex1_v", 1)
         self._make_labeled_entry(cv, "Vertex 2 vs. Ref (V)", "cv.vertex2_v", 2)
@@ -77,7 +83,7 @@ class ExperimentPanelView(ttk.Frame):
         self.ac_run_var = tk.BooleanVar(value=False)
         dcac = ttk.Labelframe(self, text="Electrolysis (DC/AC)", style="Card.TLabelframe")
         self._mode_frames["EA"] = dcac
-        dcac.grid(row=0, column=1, padx=6, pady=6, sticky="nw")
+        dcac.grid(row=0, column=1, padx=6, pady=6, sticky="nsew")
         tools = ttk.Frame(dcac, style="CardPlain.TFrame")
         tools.grid(row=0, column=0, columnspan=2, sticky="ew")
         ttk.Checkbutton(tools, text="Run DC", variable=self.dc_run_var, style="Card.TCheckbutton").pack(side="left")
@@ -122,7 +128,7 @@ class ExperimentPanelView(ttk.Frame):
         self.cdl_eval_var = tk.BooleanVar(value=False)
         cdl = ttk.Labelframe(self, text="Capacitance (Cdl)", style="Card.TLabelframe")
         self._mode_frames["CDL"] = cdl
-        cdl.grid(row=1, column=0, padx=6, pady=6, sticky="nw")
+        cdl.grid(row=1, column=0, padx=6, pady=6, sticky="nsew")
         self._make_section_header(cdl, check_var=self.cdl_eval_var, check_text="Evaluate Cdl")
         self._make_labeled_entry(cdl, "Vertex A vs. Ref (V)", "cdl.vertex_a_v", 1)
         self._make_labeled_entry(cdl, "Vertex B vs. Ref (V)", "cdl.vertex_b_v", 2)
@@ -132,7 +138,7 @@ class ExperimentPanelView(ttk.Frame):
         self.eis_run_var = tk.BooleanVar(value=False)
         eis = ttk.Labelframe(self, text="Impedance (EIS)", style="Card.TLabelframe")
         self._mode_frames["EIS"] = eis
-        eis.grid(row=1, column=1, padx=6, pady=6, sticky="nw")
+        eis.grid(row=1, column=1, padx=6, pady=6, sticky="nsew")
         self._make_section_header(eis, check_var=self.eis_run_var, check_text="Run EIS")
         self._make_labeled_entry(eis, "Freq Start (Hz)", "eis.freq_start_hz", 1)
         self._make_labeled_entry(eis, "Freq End (Hz)", "eis.freq_end_hz", 2)
@@ -144,19 +150,30 @@ class ExperimentPanelView(ttk.Frame):
         self._set_section_enabled("EIS", bool(self.eis_run_var.get()))
         self._set_section_enabled("CDL", bool(self.cdl_eval_var.get()))
 
-        # Footer
-        footer = ttk.Frame(self)
-        footer.grid(row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=(4, 6))
-        for idx in range(2):
-            footer.columnconfigure(idx, weight=1)
-        ttk.Button(footer, text="Update Parameters", command=self._on_apply_params).grid(
-            row=0, column=0, sticky="w", padx=6
+        # Footer: each button is gridded directly onto self's own row 0/1
+        # columns (not a separate 50/50-split footer frame), so End Task
+        # inherits column 0's width (shared with CV/CDL) and Update
+        # Parameters inherits column 1's width (shared with DCAC/EIS) --
+        # same column-width-matching mechanism as the four cards above.
+        ttk.Button(self, text="End Task", command=self._confirm_end_task).grid(
+            row=2, column=0, sticky="ew", padx=6, pady=(4, 6)
         )
-        ttk.Button(footer, text="End Task", command=self._on_end_task).grid(
-            row=0, column=1, sticky="e", padx=6
+        ttk.Button(self, text="Update Parameters", command=self._on_apply_params).grid(
+            row=2, column=1, sticky="ew", padx=6, pady=(4, 6)
         )
 
     # --- helpers -------------------------------------------------------
+    def _confirm_end_task(self) -> None:
+        """Ask for confirmation before forwarding the "End Task" action.
+
+        A simple UI-only confirmation (no business logic), so an accidental
+        click doesn't end the task; only calls through to the injected
+        on_end_task callback if the user confirms.
+        """
+        if messagebox.askyesno("End Task", "End the current task?", parent=self):
+            if self._on_end_task:
+                self._on_end_task()
+
     def _validate_control_mode(self, proposed: str) -> bool:
         """Accept a typed Control Mode value only if it's one of the
         allowed options; otherwise snap back to the last valid value.

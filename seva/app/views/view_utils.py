@@ -28,15 +28,16 @@ __all__ = [
     "STATUS_COLORS",
     "apply_theme",
     "load_logo_image",
+    "load_icon_image",
     "well_style_name",
     "status_style_name",
 ]
 
-# Accent derived from the SEVA logo's own pixel color (#F2802C), deepened
-# just enough to clear WCAG AA contrast (4.5:1) as white button text.
-ACCENT = "#C0580C"
-ACCENT_HOVER = "#A84B0A"
-ACCENT_SOFT = "#FCEEE3"
+# ACCENT_HOVER/ACCENT_SOFT are derived from ACCENT (darken ~15% / blend
+# 90% toward white) to stay visually consistent with it.
+ACCENT = "#F3822F"
+ACCENT_HOVER = "#CF6E28"
+ACCENT_SOFT = "#FEF2EA"
 CONFIGURED = "#D9F0DB"
 CONFIGURED_BORDER = "#8FCB95"
 
@@ -166,11 +167,11 @@ def apply_theme(root: tk.Misc) -> None:
 
     # ---- Inputs ----
     style.configure(
-        "TEntry", fieldbackground="#FFFFFF", bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=5,
+        "TEntry", fieldbackground="#FFFFFF", bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER, padding=(5, 2),
     )
     style.map("TEntry", bordercolor=[("focus", ACCENT)])
     style.configure(
-        "TCombobox", fieldbackground="#FFFFFF", bordercolor=BORDER, arrowcolor=TEXT_MUTED, padding=4,
+        "TCombobox", fieldbackground="#FFFFFF", bordercolor=BORDER, arrowcolor=TEXT_MUTED, padding=(5, 2),
     )
 
     # ---- Progressbar ----
@@ -271,4 +272,31 @@ def load_logo_image(path: Optional[Path] = None) -> Optional["tk.PhotoImage"]:
         return None
     image = Image.open(path)
     image.thumbnail((160, 48), Image.LANCZOS)
+    return ImageTk.PhotoImage(image)
+
+
+def load_icon_image(path: Optional[Path] = None) -> Optional["tk.PhotoImage"]:
+    """Load the SEVA window icon (title bar / taskbar), if available.
+
+    Call ``root.iconphoto(True, image)`` with the result once on the main
+    window: the ``True`` makes it the default icon for that window AND
+    every ``tk.Toplevel`` dialog created afterward (Settings, Run Overview,
+    Runs, Data Plotter, ...), so each sub-window doesn't need its own call.
+
+    Args:
+        path: Optional explicit path; defaults to seva/app/assets/seva_icon.png.
+
+    Returns:
+        A PhotoImage-compatible object, or None if Pillow or the file is unavailable.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent.parent / "assets" / "seva_icon.png"
+    if not path.exists():
+        return None
+    try:
+        from PIL import Image, ImageTk
+    except ImportError:
+        return None
+    image = Image.open(path)
+    image.thumbnail((64, 64), Image.LANCZOS)
     return ImageTk.PhotoImage(image)

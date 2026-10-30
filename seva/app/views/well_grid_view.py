@@ -34,7 +34,6 @@ class WellGridView(ttk.Frame):
         on_copy_params_from: OnWell = None,
         on_paste_params_to_selection: OnVoid = None,
         on_reset_selected: OnVoid = None,
-        on_reset_all: OnVoid = None,
         on_open_plot: OnWell = None,
         on_electrode_mode_changed: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -49,7 +48,6 @@ class WellGridView(ttk.Frame):
             on_copy_params_from: Context menu copy-source callback.
             on_paste_params_to_selection: Context menu paste callback.
             on_reset_selected: Context menu reset callback for selected wells.
-            on_reset_all: Toolbar callback for resetting all wells.
             on_open_plot: Double-click/context callback for per-well plotting.
             on_electrode_mode_changed: Callback receiving normalized ``2E/3E``.
         """
@@ -62,7 +60,6 @@ class WellGridView(ttk.Frame):
         self._on_copy_params_from = on_copy_params_from
         self._on_paste_params_to_selection = on_paste_params_to_selection
         self._on_reset_selected = on_reset_selected
-        self._on_reset_all = on_reset_all
         self._on_open_plot = on_open_plot
         self._on_electrode_mode_changed = on_electrode_mode_changed
         self._electrode_display = tk.StringVar(value="3-electrode")
@@ -81,9 +78,9 @@ class WellGridView(ttk.Frame):
         """Build toolbar and box/well button matrix."""
         toolbar = ttk.Frame(self, style="CardPlain.TFrame")
         toolbar.pack(fill="x", pady=(0, 4))
-        # Three equal-weight columns so the two reset buttons and the
+        # Two equal-weight columns so the reset button and the
         # electrode-mode dropdown are evenly spaced across the full width.
-        for col in range(3):
+        for col in range(2):
             toolbar.columnconfigure(col, weight=1)
 
         ttk.Button(
@@ -91,14 +88,9 @@ class WellGridView(ttk.Frame):
             text="Reset Well Config",
             command=self._on_reset_selected,
         ).grid(row=0, column=0, sticky="w")
-        ttk.Button(
-            toolbar,
-            text="Reset all Wells",
-            command=self._on_reset_all,
-        ).grid(row=0, column=1, sticky="")
 
         mode_frame = ttk.Frame(toolbar, style="CardPlain.TFrame")
-        mode_frame.grid(row=0, column=2, sticky="e")
+        mode_frame.grid(row=0, column=1, sticky="e")
         ttk.Label(mode_frame, text="Electrode Mode:", style="CardMuted.TLabel").pack(side="left", padx=(0, 6))
         self._mode_combo = ttk.Combobox(
             mode_frame, textvariable=self._electrode_display,
@@ -124,7 +116,15 @@ class WellGridView(ttk.Frame):
                 c = 0 if i <= 5 else 1
                 # Well ids are globally indexed (A1..A10, B11..B20, ...).
                 wid = f"{box}{global_index}"
-                btn = ttk.Button(lf, text=str(global_index), style=view_utils.well_style_name(selected=False, configured=False))
+                # width=3 (characters): without it, ttk.Button falls back to
+                # a much wider theme-default minimum (~74px for a 2-digit
+                # label) regardless of padding, which crowded the box groups
+                # together and left the inter-group spacing looking uneven
+                # inside the fixed-width Plate frame.
+                btn = ttk.Button(
+                    lf, text=str(global_index), width=10,
+                    style=view_utils.well_style_name(selected=False, configured=False),
+                )
                 btn.grid(row=r, column=c, padx=2, pady=1, sticky="nsew")
                 btn.bind("<Button-1>", lambda e, w=wid: self._on_click(e, w))
                 btn.bind("<Double-Button-1>", lambda e, w=wid: self._on_open_plot(w))
@@ -177,11 +177,6 @@ class WellGridView(ttk.Frame):
         for w in wells:
             self._configured.discard(w)
         self._repaint_some(wells)
-
-    def clear_all_configured(self) -> None:
-        """Clear configured state for all wells and repaint full grid."""
-        self._configured.clear()
-        self._repaint_all()
 
     def set_electrode_mode(self, mode: str) -> None:
         """Set electrode-mode combobox from normalized token.
@@ -328,7 +323,6 @@ if __name__ == "__main__":
         on_copy_params_from=lambda well: print(f"[demo] copy params from {well}"),
         on_paste_params_to_selection=lambda: print("[demo] paste params to selection"),
         on_reset_selected=lambda: print("[demo] reset selected wells"),
-        on_reset_all=lambda: print("[demo] reset all wells"),
         on_open_plot=lambda well: print(f"[demo] open plot for {well}"),
     )
     grid.pack(fill="both", expand=True)

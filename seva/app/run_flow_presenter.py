@@ -124,6 +124,11 @@ class RunFlowPresenter:
         self._scheduler = PollingScheduler(win.after, win.after_cancel)
         self._activity_delay_ms: int = 2000
         self._activity_signature: Optional[Tuple[Tuple[str, str], ...]] = None
+        # Tracks the last-known device connectivity outcome so the statusbar
+        # message is only touched on an actual change (connected <->
+        # disconnected), not clobbered by every poll tick -- it shares its
+        # StringVar with toast messages.
+        self._devices_reachable: Optional[bool] = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -597,6 +602,7 @@ class RunFlowPresenter:
     def _on_activity_poll_tick(self) -> None:
         """Poll device activity and adapt next delay based on change signature."""
         if not self.controller.ensure_ready() or not self.controller.uc_poll_device_status:
+            self._update_connectivity_status(False)
             self._activity_delay_ms = 10000
             self._schedule_activity_poll(self._activity_delay_ms)
             return
@@ -607,11 +613,25 @@ class RunFlowPresenter:
             if isinstance(url, str) and url.strip()
         ]
         if not boxes:
+            self._update_connectivity_status(False)
             self._activity_delay_ms = 10000
             self._schedule_activity_poll(self._activity_delay_ms)
             return
 
-        snapshot = self.controller.uc_poll_device_status(sorted(boxes))
+        try:
+            snapshot = self.controller.uc_poll_device_status(sorted(boxes))
+        except Exception:
+            # A device-communication failure here (timeout, connection
+            # refused, ...) shouldn't crash the scheduled poll loop -- surface
+            # it as a connectivity status change and keep polling, same
+            # backoff as the "nothing configured" case above.
+            self._log.warning("Activity poll failed; devices unreachable.", exc_info=True)
+            self._update_connectivity_status(False)
+            self._activity_delay_ms = 10000
+            self._schedule_activity_poll(self._activity_delay_ms)
+            return
+
+        self._update_connectivity_status(True)
         signature = tuple(sorted((entry.well_id, entry.status) for entry in snapshot.entries))
         if signature == self._activity_signature:
             self._activity_delay_ms = min(10000, self._activity_delay_ms + 2000)
@@ -621,6 +641,19 @@ class RunFlowPresenter:
 
         self.progress_vm.apply_device_activity(snapshot)
         self._schedule_activity_poll(self._activity_delay_ms)
+
+    def _update_connectivity_status(self, reachable: bool) -> None:
+        """Update the statusbar message, but only on an actual change in
+        device-connectivity state -- it shares its StringVar with toast
+        messages, so this must not overwrite those on every poll tick.
+
+        Args:
+            reachable: Whether the most recent device poll succeeded.
+        """
+        if reachable == self._devices_reachable:
+            return
+        self._devices_reachable = reachable
+        self.win.set_status_message("Idle." if reachable else "No devices connected.")
 
     def _schedule_poll(self, group_id: str, delay_ms: int) -> None:
         """Schedule the next poll tick for a given group.

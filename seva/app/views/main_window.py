@@ -16,6 +16,7 @@ Notes:
 - All external interactions are signaled via callbacks passed to the constructor.
 """
 from __future__ import annotations
+import string
 import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
@@ -62,10 +63,29 @@ class MainWindowView(tk.Tk):
         # fought with minsize (750 vs 1000 wide), forcing the window wider
         # than its content and leaving Plate's "ew"-stretched border out of
         # alignment with the compact experiment panel below it.
-        self.minsize(820, 600)
+        # 850, not 820: Plate is hardcoded to 800px wide (see PLATE_WIDTH
+        # below) plus ~16px of padding, leaving only ~4px of margin at 820 --
+        # too tight to reliably avoid clipping Plate's right edge.
+        # WINDOW_X/WINDOW_Y: pixel position (from the screen's top-left) the
+        # window opens at. Tune these to place it wherever you want on
+        # screen; they don't affect the fixed 740x875 size above.
+        WINDOW_X = 100
+        WINDOW_Y = 25
+        self.geometry(f"740x875+{WINDOW_X}+{WINDOW_Y}")
+        self.minsize(740, 600)
+        self.maxsize(740, 875)
         view_utils.apply_theme(self)
         self.configure(bg=view_utils.PAGE_BG)
         self._logo_image = view_utils.load_logo_image()
+
+        # Replaces the default Tk "feather" icon in the title bar/taskbar.
+        # iconphoto's `default=True` makes this the icon for this window
+        # AND every tk.Toplevel dialog opened afterward (Settings, Run
+        # Overview, Runs, Data Plotter, ...), so each one doesn't need its
+        # own call.
+        self._icon_image = view_utils.load_icon_image()
+        if self._icon_image is not None:
+            self.iconphoto(True, self._icon_image)
 
         # Keep references to callbacks (can be None; we guard before calling)
         self._on_submit = on_submit
@@ -125,7 +145,7 @@ class MainWindowView(tk.Tk):
         col += 1
         ttk.Button(
             toolbar, text="Start", style="Accent.TButton", command=self._on_submit
-        ).grid(row=0, column=col, padx=(75, 0))
+        ).grid(row=0, column=col, padx=(40, 0))
 
     # ------------------------------------------------------------------
     # Main Area (split: left WellGrid, right Notebook)
@@ -146,14 +166,23 @@ class MainWindowView(tk.Tk):
         content.rowconfigure(1, weight=1)
         content.columnconfigure(0, weight=1)
 
-        # Row 0: Plate — stretched ("ew") to match the toolbar and body rows
-        # below it, all of which share this same content column. Since none
-        # of the three rows is hardcoded wider than its own natural content
-        # (see the window's minsize/geometry change in __init__), they all
-        # converge on one consistent width -- the widest row's natural
-        # width -- so every frame's left/right border lines up.
-        self.wellgrid_host = ttk.Labelframe(content, text="Plate", style="Card.TLabelframe")
-        self.wellgrid_host.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        # Row 0: Plate — hardcoded to a fixed pixel size (not stretched to
+        # match the window) so resizing the window never changes it; tune
+        # PLATE_WIDTH/PLATE_HEIGHT to align it with the rows below. The
+        # mounted WellGridView is pack()-managed inside this host, so it's
+        # pack_propagate (not grid_propagate) that must be disabled to make
+        # the size stick regardless of the box-grid content inside -- and
+        # both width AND height must be given explicitly, since pack_propagate
+        # freezes whichever dimension is left unset at its size *right now*
+        # (still 0, before WellGridView is even mounted), not its eventual
+        # content size.
+        PLATE_WIDTH = 725
+        PLATE_HEIGHT = 270
+        self.wellgrid_host = ttk.Labelframe(
+            content, text="Plate", style="Card.TLabelframe", width=PLATE_WIDTH, height=PLATE_HEIGHT
+        )
+        self.wellgrid_host.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.wellgrid_host.pack_propagate(False)
 
         # Row 1: center (Experiment) + right status rail
         body = ttk.Frame(content)
@@ -171,32 +200,52 @@ class MainWindowView(tk.Tk):
         exp_outer, self.tab_experiment = self._make_scroll_host(body)
         exp_outer.grid(row=0, column=0, sticky="ns", padx=(0, 8))
 
-        self.status_rail_host = ttk.Frame(body, width=300)
+        self.status_rail_host = ttk.Frame(body, width=267)
         self.status_rail_host.grid(row=0, column=1, sticky="ns")
-        self.status_rail_host.grid_propagate(False)
+        # Its children (run_overview_rail_host etc.) are pack()-managed, not
+        # grid()-managed, so it's pack_propagate (not grid_propagate) that
+        # must be disabled for the explicit width= above to actually stick
+        # instead of being silently ignored.
+        self.status_rail_host.pack_propagate(False)
 
-        # Run Overview and Recent Runs are pinned to the same fixed height
-        # (with pack_propagate(False) so content can't stretch them) so the
-        # two cards visually match; Recent Runs gets an internal scrollbar
-        # (see CompactRunsView) since its row count can exceed that height.
+        # Rail order top-to-bottom: Channel Activity, Run Overview, Recent
+        # Runs. Run Overview and Recent Runs are pinned to the same fixed
+        # height (with pack_propagate(False) so content can't stretch them)
+        # so the two cards visually match; Recent Runs gets an internal
+        # scrollbar (see CompactRunsView) since its row count can exceed
+        # that height.
         RAIL_CARD_HEIGHT = 100
+
+        # "General" is this Labelframe's own native title (Card.TLabelframe,
+        # same mechanism/font as the "Cyclic Voltammetry (CV)" / "Electrolysis
+        # (DC/AC)" card titles) -- NOT a separate label sitting above the
+        # border. A separate label was tried first, but its own text row
+        # unavoidably pushed the border down below where CV/DC-AC's borders
+        # start (their titles sit ON the border, so there's no gap to begin
+        # with); only a native title can match that exactly. "Channel
+        # Activity" still stays inside as ChannelActivityView's own
+        # content-drawn heading, unchanged.
+        self.activity_rail_host = ttk.Labelframe(
+            self.status_rail_host, text="General", style="Card.TLabelframe"
+        )
+        # pady top=6: CV and DC/AC's titles were previously 4px apart from
+        # each other because CV's own grid() call used pady=(2,6) instead of
+        # the plain pady=6 DC/AC uses -- fixed at the source in
+        # experiment_panel_view.py, so both now land on the same row, and
+        # this 6px matches that corrected, now-shared value exactly.
+        self.activity_rail_host.pack(fill="x", pady=(6, 0))
 
         self.run_overview_rail_host = ttk.Labelframe(
             self.status_rail_host, text="", style="Rail.TLabelframe", height=RAIL_CARD_HEIGHT
         )
-        self.run_overview_rail_host.pack(fill="x", pady=(0, 10))
+        self.run_overview_rail_host.pack(fill="x", pady=(0, 0))
         self.run_overview_rail_host.pack_propagate(False)
 
         self.runs_rail_host = ttk.Labelframe(
             self.status_rail_host, text="", style="Rail.TLabelframe", height=RAIL_CARD_HEIGHT
         )
-        self.runs_rail_host.pack(fill="x", pady=(0, 10))
+        self.runs_rail_host.pack(fill="x", pady=(0, 0))
         self.runs_rail_host.pack_propagate(False)
-
-        self.activity_rail_host = ttk.Labelframe(
-            self.status_rail_host, text="Channel Activity", style="Rail.TLabelframe"
-        )
-        self.activity_rail_host.pack(fill="x", pady=(0, 10))
 
 
     def _make_scroll_host(self, parent: tk.Widget):
@@ -292,7 +341,11 @@ class MainWindowView(tk.Tk):
         self._relay_area.grid(row=0, column=2, sticky="w", padx=(12, 0))
         self._relay_labels = {}  # type: dict[str, ttk.Label]
 
-        self.status_message_var = tk.StringVar(value="Ready.")
+        # "Initializing...": shown while the rest of App.__init__ (view
+        # wiring, settings load, use-case construction) is still running;
+        # main.py replaces this with a real status once that finishes, based
+        # on whether any devices are actually configured/reachable.
+        self.status_message_var = tk.StringVar(value="Initializing...")
         ttk.Label(status, textvariable=self.status_message_var).grid(row=0, column=3, sticky="e")
 
     # ------------------------------------------------------------------
@@ -309,10 +362,16 @@ class MainWindowView(tk.Tk):
     def set_editing_well(self, well_label: str) -> None:
         """Update the statusbar label showing which well is currently edited.
 
+        Well ids are globally numbered already (A1..A10, B11..B20, ...), so
+        the leading box letter is redundant -- strip it and show just the
+        number. Non-well placeholders ("-", "–" for no/multi selection)
+        have no leading letters, so they pass through unchanged.
+
         Args:
             well_label: Well label string to render.
         """
-        self.editing_well_var.set(f"Editing Well: {well_label}")
+        number_only = well_label.lstrip(string.ascii_letters)
+        self.editing_well_var.set(f"Editing Well: {number_only}")
 
     def mount_wellgrid(self, view: tk.Widget) -> None:
         """Mount the WellGridView into the left scroll host.

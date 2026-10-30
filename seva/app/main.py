@@ -188,7 +188,6 @@ class App:
             on_paste_params_to_selection=self.plate_vm.cmd_paste_to_selection,
             on_toggle_enable_selected=self.plate_vm.cmd_toggle_enable_selection,
             on_reset_selected=self._on_reset_well_config,
-            on_reset_all=self._on_reset_all_wells,
             on_open_plot=lambda wid: self._open_plot_for_well(wid),
             on_electrode_mode_changed=self._on_electrode_mode_changed,  # relay-only, not part of REST
         )
@@ -307,7 +306,21 @@ class App:
 
         # ---- Initial UI state (demo-ish) ----
         self._seed_demo_state()
-        self.win.set_status_message("Ready.")
+        # Cheap, synchronous check (no network I/O): are any box API URLs
+        # even configured? If not, "no devices connected" is already known
+        # for certain. If some are configured, actual reachability is only
+        # known once the background activity poll (already started above)
+        # completes a round -- _on_activity_poll_tick corrects this message
+        # from there based on the real result.
+        configured_boxes = [
+            str(box)
+            for box, url in (self.settings_vm.api_base_urls or {}).items()
+            if isinstance(url, str) and url.strip()
+        ]
+        if configured_boxes:
+            self.win.set_status_message("Idle.")
+        else:
+            self.win.set_status_message("No devices connected.")
 
     def _load_user_settings(self) -> None:
         """Load persisted settings, apply them to the SettingsVM, and sync UI.
@@ -693,21 +706,6 @@ class App:
         self.wellgrid.clear_configured_wells(selection)
         self._on_selection_changed(selection)
         self.win.show_toast("Well config reset.")
-
-    def _on_reset_all_wells(self) -> None:
-        """Clear all per-well parameter snapshots and reset selection state.
-        """
-        configured = self.plate_vm.configured()
-        if not configured and not self.plate_vm.get_selection():
-            self.win.show_toast("No wells to reset.")
-            return
-
-        self.experiment_vm.clear_all_params()
-        self.plate_vm.clear_all_configured()
-        self.plate_vm.set_selection([])
-        self.wellgrid.clear_all_configured()
-        self.wellgrid.set_selection([])
-        self.win.show_toast("All wells reset.")
 
     def _on_electrode_mode_changed(self, mode: str) -> None:
         """Apply electrode-mode change to VM first, then relay use case.
