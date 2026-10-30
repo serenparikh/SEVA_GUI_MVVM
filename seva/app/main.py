@@ -308,18 +308,25 @@ class App:
         self._seed_demo_state()
         # Cheap, synchronous check (no network I/O): are any box API URLs
         # even configured? If not, "no devices connected" is already known
-        # for certain. If some are configured, actual reachability is only
-        # known once the background activity poll (already started above)
-        # completes a round -- _on_activity_poll_tick corrects this message
-        # from there based on the real result.
+        # for certain -- no scan will run (run_flow_presenter's poll tick
+        # returns early with nothing to poll), so this is final.
+        #
+        # If some ARE configured, leave the "Initializing..." default from
+        # MainWindowView in place rather than guessing "Idle." here: the
+        # first activity-poll tick (already scheduled above, fires ~2s from
+        # now) makes a BLOCKING device-registry request per configured box
+        # (JobRestAdapter._build_registry, up to request_timeout_s=10s times
+        # retries, each) that freezes this single-threaded Tk app until it
+        # resolves -- only _on_activity_poll_tick's real result (connected
+        # vs. unreachable) should replace "Initializing...", per "server
+        # status is the source of truth," not a client-side guess made
+        # before that scan has even run.
         configured_boxes = [
             str(box)
             for box, url in (self.settings_vm.api_base_urls or {}).items()
             if isinstance(url, str) and url.strip()
         ]
-        if configured_boxes:
-            self.win.set_status_message("Idle.")
-        else:
+        if not configured_boxes:
             self.win.set_status_message("No devices connected.")
 
     def _load_user_settings(self) -> None:

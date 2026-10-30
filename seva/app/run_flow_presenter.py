@@ -600,32 +600,34 @@ class RunFlowPresenter:
         self._scheduler.schedule("activity", delay, self._on_activity_poll_tick)
 
     def _on_activity_poll_tick(self) -> None:
-        """Poll device activity and adapt next delay based on change signature."""
-        if not self.controller.ensure_ready() or not self.controller.uc_poll_device_status:
-            self._update_connectivity_status(False)
-            self._activity_delay_ms = 10000
-            self._schedule_activity_poll(self._activity_delay_ms)
-            return
+        """Poll device activity and adapt next delay based on change signature.
 
-        boxes = [
-            str(box)
-            for box, url in (self.settings_vm.api_base_urls or {}).items()
-            if isinstance(url, str) and url.strip()
-        ]
-        if not boxes:
-            self._update_connectivity_status(False)
-            self._activity_delay_ms = 10000
-            self._schedule_activity_poll(self._activity_delay_ms)
-            return
-
+        The whole body runs under one try/except: ``ensure_ready()`` itself
+        is what makes the blocking, timeout-prone device-registry request
+        (JobRestAdapter._build_registry), so a connection failure there -- not
+        just from ``uc_poll_device_status`` later -- has to be caught here too,
+        or it propagates out of this ``win.after``-scheduled callback
+        uncaught, which both kills the poll loop (nothing reschedules it) and
+        leaves the statusbar stuck on "Initializing..." forever.
+        """
         try:
+            if not self.controller.ensure_ready() or not self.controller.uc_poll_device_status:
+                raise RuntimeError("Device adapter not ready.")
+
+            boxes = [
+                str(box)
+                for box, url in (self.settings_vm.api_base_urls or {}).items()
+                if isinstance(url, str) and url.strip()
+            ]
+            if not boxes:
+                raise RuntimeError("No device boxes configured.")
+
             snapshot = self.controller.uc_poll_device_status(sorted(boxes))
-        except Exception:
-            # A device-communication failure here (timeout, connection
-            # refused, ...) shouldn't crash the scheduled poll loop -- surface
-            # it as a connectivity status change and keep polling, same
-            # backoff as the "nothing configured" case above.
-            self._log.warning("Activity poll failed; devices unreachable.", exc_info=True)
+        except Exception as exc:
+            # Any failure above (timeout, connection refused, nothing
+            # configured, adapter not ready, ...) is reported the same way:
+            # devices unreachable, back off, keep polling.
+            self._log.warning("Activity poll failed; devices unreachable: %s", exc)
             self._update_connectivity_status(False)
             self._activity_delay_ms = 10000
             self._schedule_activity_poll(self._activity_delay_ms)
