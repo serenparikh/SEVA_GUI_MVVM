@@ -140,8 +140,8 @@ class ExperimentPanelView(ttk.Frame):
         self._mode_frames["CDL"] = cdl
         cdl.grid(row=1, column=0, padx=6, pady=6, sticky="nsew")
         self._make_section_header(cdl, check_var=self.cdl_eval_var, check_text="Evaluate Cdl")
-        self._make_labeled_entry(cdl, "Vertex A vs. Ref (V)", "cdl.vertex_a_v", 1)
-        self._make_labeled_entry(cdl, "Vertex B vs. Ref (V)", "cdl.vertex_b_v", 2)
+        self._make_labeled_entry(cdl, "Vertex A vs. OCP (V)", "cdl.vertex_a_v", 1)
+        self._make_labeled_entry(cdl, "Vertex B vs. OCP (V)", "cdl.vertex_b_v", 2)
         self._register_flag("eval_cdl", self.cdl_eval_var)
 
         # EIS

@@ -81,6 +81,12 @@ def apply_theme(root: tk.Misc) -> None:
 
     # ---- Base ----
     style.configure(".", font=BASE_FONT, background=PAGE_BG, foreground=TEXT)
+    # Suppresses the dashed "keyboard focus" rectangle ttk draws around
+    # whatever widget was last clicked (buttons, checkbuttons, comboboxes,
+    # ...) -- an empty focuscolor means clam/alt/default simply skip
+    # drawing it. Every style below inherits this unless it sets its own
+    # focuscolor, so this one line covers the whole app.
+    style.configure(".", focuscolor="")
     style.configure("TFrame", background=PAGE_BG)
     style.configure("TLabel", background=PAGE_BG, foreground=TEXT)
     style.configure("TCheckbutton", background=PAGE_BG, foreground=TEXT)

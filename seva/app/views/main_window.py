@@ -143,9 +143,13 @@ class MainWindowView(tk.Tk):
             row=0, column=col, padx=6
         )
         col += 1
+        # padx left=37, not 40: Start's right edge sat 3px past Plate's/the
+        # status rail's right edge (measured via winfo_rootx()/winfo_width()
+        # on the fully-mounted layout); trimming 3px off its left gap pulls
+        # it back flush without changing the button's own width.
         ttk.Button(
             toolbar, text="Start", style="Accent.TButton", command=self._on_submit
-        ).grid(row=0, column=col, padx=(40, 0))
+        ).grid(row=0, column=col, padx=(37, 0))
 
     # ------------------------------------------------------------------
     # Main Area (split: left WellGrid, right Notebook)
