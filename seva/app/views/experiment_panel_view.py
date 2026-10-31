@@ -144,6 +144,7 @@ class ExperimentPanelView(ttk.Frame):
         self._make_labeled_entry(cdl, "Vertex B vs. OCP (V)", "cdl.vertex_b_v", 2)
         self._register_flag("eval_cdl", self.cdl_eval_var)
 
+
         # EIS
         self.eis_run_var = tk.BooleanVar(value=False)
         eis = ttk.Labelframe(self, text="Impedance (EIS)", style="Card.TLabelframe")
