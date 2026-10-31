@@ -58,14 +58,11 @@ class MainWindowView(tk.Tk):
 
         # ---- Window basics ----
         self.title("SEVA – Schindler Electrolysis and Voltammetry Analysis")
-        # No explicit geometry(): the window shrink-wraps to its actual
-        # content size on first draw. A hardcoded geometry here previously
-        # fought with minsize (750 vs 1000 wide), forcing the window wider
-        # than its content and leaving Plate's "ew"-stretched border out of
-        # alignment with the compact experiment panel below it.
-        # 850, not 820: Plate is hardcoded to 800px wide (see PLATE_WIDTH
-        # below) plus ~16px of padding, leaving only ~4px of margin at 820 --
-        # too tight to reliably avoid clipping Plate's right edge.
+        # Fixed 740x875: width is pinned (minsize/maxsize width both 740)
+        # since the whole layout -- Plate width, the experiment panel's
+        # card widths, and the status rail's 267px -- is tuned to exactly
+        # fill it (see PLATE_WIDTH below). A wider window would just leave
+        # a visible gap to the right of the status rail.
         # WINDOW_X/WINDOW_Y: pixel position (from the screen's top-left) the
         # window opens at. Tune these to place it wherever you want on
         # screen; they don't affect the fixed 740x875 size above.
@@ -122,7 +119,10 @@ class MainWindowView(tk.Tk):
 
         col = 0
         if self._logo_image is not None:
-            ttk.Label(toolbar, image=self._logo_image).grid(row=0, column=col, padx=(0, 12))
+            # padx left=6: matches Plate's/CV's own padx=(6, 0) so the logo's
+            # left edge lines up with theirs instead of sitting 6px further
+            # left (toolbar and content share the same padx=8 outer offset).
+            ttk.Label(toolbar, image=self._logo_image).grid(row=0, column=col, padx=(6, 12))
             col += 1
 
         # Left-to-right order: Settings, Save Plate, Load Plate, Data
@@ -176,12 +176,27 @@ class MainWindowView(tk.Tk):
         # freezes whichever dimension is left unset at its size *right now*
         # (still 0, before WellGridView is even mounted), not its eventual
         # content size.
-        PLATE_WIDTH = 725
+        # 717: below this, the explicit width is the binding constraint and
+        # sticks exactly; above it, `content`'s single grid column (shared
+        # with the body row below) clamps Plate to the column's own natural
+        # width instead, so a larger PLATE_WIDTH has no effect. 717 is the
+        # largest value that still renders at its exact nominal size, and it
+        # was chosen because it lands Plate's right border exactly on the
+        # status rail's right border below (measured via winfo_rootx()/
+        # winfo_width() on the fully-mounted layout, with Plate's own
+        # padx=(6, 0) below factored in).
+        PLATE_WIDTH = 717
         PLATE_HEIGHT = 270
         self.wellgrid_host = ttk.Labelframe(
             content, text="Plate", style="Card.TLabelframe", width=PLATE_WIDTH, height=PLATE_HEIGHT
         )
-        self.wellgrid_host.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        # padx=(6, 0): CV/CDL below sit inside ExperimentPanelView's own
+        # grid() with padx=6 each, so their actual left border is 6px right
+        # of the experiment panel's (and this frame's own parent's) left
+        # edge. Matching that offset here keeps Plate's left border flush
+        # with CV's and Capacitance's left borders instead of sitting 6px
+        # further left.
+        self.wellgrid_host.grid(row=0, column=0, sticky="w", padx=(6, 0), pady=(0, 8))
         self.wellgrid_host.pack_propagate(False)
 
         # Row 1: center (Experiment) + right status rail

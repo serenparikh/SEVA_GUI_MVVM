@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -129,6 +131,19 @@ class RunFlowPresenter:
         # disconnected), not clobbered by every poll tick -- it shares its
         # StringVar with toast messages.
         self._devices_reachable: Optional[bool] = None
+        # Guards against overlapping background polls: the device scan
+        # itself (ensure_ready/uc_poll_device_status) is blocking network
+        # I/O, now run off the Tk thread (see _on_activity_poll_tick) so it
+        # no longer freezes the whole GUI for its 10s+ timeout -- this flag
+        # just stops a new poll from starting while one is still in flight.
+        self._activity_poll_in_flight = False
+        # Results cross from the worker thread to the Tk thread via this
+        # queue, polled only by a win.after() loop that's always scheduled
+        # FROM the Tk thread -- calling win.after() directly from the
+        # worker thread doesn't reliably wake Tk's event loop (verified: the
+        # scheduled callback simply never ran), so a thread-safe queue is
+        # the only part actually touched cross-thread.
+        self._activity_result_queue: "queue.Queue" = queue.Queue()
 
     # ------------------------------------------------------------------
     # Public properties
@@ -600,34 +615,85 @@ class RunFlowPresenter:
         self._scheduler.schedule("activity", delay, self._on_activity_poll_tick)
 
     def _on_activity_poll_tick(self) -> None:
-        """Poll device activity and adapt next delay based on change signature.
+        """Kick off one device-activity poll without blocking the GUI.
 
-        The whole body runs under one try/except: ``ensure_ready()`` itself
-        is what makes the blocking, timeout-prone device-registry request
-        (JobRestAdapter._build_registry), so a connection failure there -- not
-        just from ``uc_poll_device_status`` later -- has to be caught here too,
-        or it propagates out of this ``win.after``-scheduled callback
-        uncaught, which both kills the poll loop (nothing reschedules it) and
-        leaves the statusbar stuck on "Initializing..." forever.
+        ``ensure_ready()`` (first call constructs ``JobRestAdapter``, which
+        makes a blocking device-registry request) and
+        ``uc_poll_device_status(...)`` are both synchronous network I/O with
+        a 10s+ timeout. Running them directly on this ``win.after``-scheduled
+        callback used to freeze the entire single-threaded Tk app for that
+        whole duration on every failed/slow poll. They now run on a
+        background thread; the result crosses back via a thread-safe queue
+        that ``_poll_activity_result_queue`` checks on a Tk-thread timer, and
+        only that method (and ``_finish_activity_poll_tick``, which it calls)
+        touches Tk state.
+        """
+        if self._activity_poll_in_flight:
+            # Previous poll hasn't returned yet; don't start a second one on
+            # top of it. Just check back at the normal cadence.
+            self._schedule_activity_poll(self._activity_delay_ms)
+            return
+
+        boxes = [
+            str(box)
+            for box, url in (self.settings_vm.api_base_urls or {}).items()
+            if isinstance(url, str) and url.strip()
+        ]
+        if not boxes:
+            # No network I/O needed to know this -- handle it inline rather
+            # than spinning up a thread for nothing.
+            self._update_connectivity_status(False)
+            self._activity_delay_ms = 10000
+            self._schedule_activity_poll(self._activity_delay_ms)
+            return
+
+        self._activity_poll_in_flight = True
+
+        def worker() -> None:
+            """Runs off the Tk thread: blocking device I/O only, no UI calls."""
+            try:
+                if not self.controller.ensure_ready() or not self.controller.uc_poll_device_status:
+                    raise RuntimeError("Device adapter not ready.")
+                snapshot = self.controller.uc_poll_device_status(sorted(boxes))
+            except Exception as exc:  # noqa: BLE001 - reported on the Tk thread below
+                self._activity_result_queue.put(("error", exc))
+                return
+            self._activity_result_queue.put(("ok", snapshot))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._poll_activity_result_queue()
+
+    def _poll_activity_result_queue(self) -> None:
+        """Check for a background activity-poll result without blocking.
+
+        Runs only on the Tk thread (scheduled via ``win.after``, including
+        its own rescheduling below), so it's the safe place to pull a result
+        off the queue the worker thread posted to.
         """
         try:
-            if not self.controller.ensure_ready() or not self.controller.uc_poll_device_status:
-                raise RuntimeError("Device adapter not ready.")
+            kind, payload = self._activity_result_queue.get_nowait()
+        except queue.Empty:
+            self.win.after(100, self._poll_activity_result_queue)
+            return
+        if kind == "error":
+            self._finish_activity_poll_tick(error=payload)
+        else:
+            self._finish_activity_poll_tick(snapshot=payload)
 
-            boxes = [
-                str(box)
-                for box, url in (self.settings_vm.api_base_urls or {}).items()
-                if isinstance(url, str) and url.strip()
-            ]
-            if not boxes:
-                raise RuntimeError("No device boxes configured.")
+    def _finish_activity_poll_tick(self, *, snapshot=None, error: Optional[Exception] = None) -> None:
+        """Apply a background activity-poll result on the Tk thread.
 
-            snapshot = self.controller.uc_poll_device_status(sorted(boxes))
-        except Exception as exc:
-            # Any failure above (timeout, connection refused, nothing
-            # configured, adapter not ready, ...) is reported the same way:
-            # devices unreachable, back off, keep polling.
-            self._log.warning("Activity poll failed; devices unreachable: %s", exc)
+        Args:
+            snapshot: Successful poll result, or None on failure.
+            error: Exception raised during the poll, or None on success.
+        """
+        self._activity_poll_in_flight = False
+
+        if error is not None:
+            # Any failure (timeout, connection refused, adapter not ready,
+            # ...) is reported the same way: devices unreachable, back off,
+            # keep polling.
+            self._log.warning("Activity poll failed; devices unreachable: %s", error)
             self._update_connectivity_status(False)
             self._activity_delay_ms = 10000
             self._schedule_activity_poll(self._activity_delay_ms)

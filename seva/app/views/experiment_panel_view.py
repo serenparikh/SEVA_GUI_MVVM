@@ -93,6 +93,16 @@ class ExperimentPanelView(ttk.Frame):
         self._make_labeled_entry(dcac, "Charge Cutoff (C)", "ea.charge_cutoff_c", 2)
         self._make_labeled_entry(dcac, "Voltage Cutoff (V)", "ea.voltage_cutoff_v", 3)
         self._make_labeled_entry(dcac, "Frequency (Hz)", "ea.frequency_hz", 4)
+
+        # Run DC and Run AC are mutually exclusive: checking one unchecks
+        # the other. Registered before _register_flag's own traces so the
+        # exclusivity resolves first, and the EA-enabled/border update that
+        # follows always sees the final, consistent dc/ac state.
+        self.dc_run_var.trace_add("write", lambda *_: self.ac_run_var.set(False)
+                                   if self.dc_run_var.get() and self.ac_run_var.get() else None)
+        self.ac_run_var.trace_add("write", lambda *_: self.dc_run_var.set(False)
+                                   if self.ac_run_var.get() and self.dc_run_var.get() else None)
+
         self._register_flag("run_dc", self.dc_run_var)
         self._register_flag("run_ac", self.ac_run_var)
 
@@ -264,6 +274,7 @@ class ExperimentPanelView(ttk.Frame):
         frame = self._mode_frames.get(section_key)
         if not frame:
             return
+        frame.configure(style="CardActive.TLabelframe" if enabled else "Card.TLabelframe")
         state = "normal" if enabled else "disabled"
 
         def _walk(w):

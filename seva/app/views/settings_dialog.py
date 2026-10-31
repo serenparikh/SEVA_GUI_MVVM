@@ -10,6 +10,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict, Optional
 
+from seva.app.views import view_utils
+
 
 BoxId = str
 
@@ -56,7 +58,13 @@ class SettingsDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("Settings")
         self.transient(parent)
-        self.resizable(False, False)
+        # Resizable (not fixed 600x700 like before) and the body is wrapped
+        # in a scroll host (see _build_ui), so the 7 settings groups are
+        # always reachable regardless of screen size -- the fixed, non-
+        # resizable size was why content was getting cut off.
+        self.resizable(True, True)
+        self.minsize(640, 400)
+        self.configure(bg=view_utils.PAGE_BG)
 
         self._boxes = boxes
         self._on_test_connection = on_test_connection
@@ -100,25 +108,44 @@ class SettingsDialog(tk.Toplevel):
         """Create all dialog widget groups and footer actions."""
         pad = dict(padx=8, pady=6)
 
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        # Body is a scroll host, not gridded directly on self: with 7 groups
+        # stacked vertically, a fixed non-resizable dialog (the old 600x700)
+        # could cut content off the bottom with no way to reach it. This
+        # guarantees everything stays reachable regardless of screen size.
+        outer, body = self._make_scroll_host(self)
+        outer.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+
         # Connection group
-        connection = ttk.Labelframe(self, text="Boxes")
+        connection = ttk.Labelframe(body, text="Boxes", style="Card.TLabelframe")
         connection.grid(row=0, column=0, sticky="ew", **pad)
         connection.columnconfigure(1, weight=1)
         for row, box in enumerate(self._boxes):
-            ttk.Label(connection, text=f"Box {box} URL:").grid(row=row, column=0, sticky="w")
-            ttk.Entry(connection, textvariable=self.url_vars[box], width=40).grid(
-                row=row, column=1, sticky="ew", padx=(0, 8)
+            # pady=6 on every widget in the row (including the Test button,
+            # which previously had none): the button's natural height is
+            # taller than an Entry's, so leaving it unpadded let adjacent
+            # rows' buttons visually overlap each other.
+            ttk.Label(connection, text=f"Box {box} URL:", style="CardMuted.TLabel").grid(
+                row=row, column=0, sticky="w", pady=6
             )
-            ttk.Label(connection, text="API Key:").grid(row=row, column=2, sticky="e")
+            ttk.Entry(connection, textvariable=self.url_vars[box], width=40).grid(
+                row=row, column=1, sticky="ew", padx=(6, 8), pady=6
+            )
+            ttk.Label(connection, text="API Key:", style="CardMuted.TLabel").grid(
+                row=row, column=2, sticky="e", pady=6
+            )
             ttk.Entry(connection, textvariable=self.key_vars[box], width=24, show="*").grid(
-                row=row, column=3, sticky="w"
+                row=row, column=3, sticky="w", padx=(6, 8), pady=6
             )
             ttk.Button(
                 connection,
                 text="Test",
                 width=6,
                 command=lambda bid=box: self._safe_box(self._on_test_connection, bid),
-            ).grid(row=row, column=4, sticky="w")
+            ).grid(row=row, column=4, sticky="w", pady=6)
 
         ttk.Button(
             connection,
@@ -127,72 +154,76 @@ class SettingsDialog(tk.Toplevel):
         ).grid(row=len(self._boxes), column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         # Relay group
-        relay = ttk.Labelframe(self, text="Relay Box")
+        relay = ttk.Labelframe(body, text="Relay Box", style="Card.TLabelframe")
         relay.grid(row=1, column=0, sticky="ew", **pad)
         relay.columnconfigure(1, weight=1)
-        ttk.Label(relay, text="IP").grid(row=0, column=0, sticky="w")
+        ttk.Label(relay, text="IP", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Entry(relay, textvariable=self.relay_ip_var, width=20).grid(
-            row=0, column=1, sticky="w", padx=(0, 8)
+            row=0, column=1, sticky="w", padx=(6, 8)
         )
-        ttk.Label(relay, text="Port").grid(row=0, column=2, sticky="e")
-        ttk.Entry(relay, textvariable=self.relay_port_var, width=8).grid(row=0, column=3, sticky="w")
+        ttk.Label(relay, text="Port", style="CardMuted.TLabel").grid(row=0, column=2, sticky="e")
+        ttk.Entry(relay, textvariable=self.relay_port_var, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
         ttk.Button(relay, text="Test Relay", width=10, command=lambda: self._safe(self._on_test_relay)).grid(
             row=0, column=4, padx=(8, 0)
         )
 
         # Timing group
-        timing = ttk.Labelframe(self, text="Timing")
+        timing = ttk.Labelframe(body, text="Timing", style="Card.TLabelframe")
         timing.grid(row=2, column=0, sticky="ew", **pad)
         for col in range(4):
             timing.columnconfigure(col, weight=1 if col % 2 == 1 else 0)
-        ttk.Label(timing, text="Request timeout (s)").grid(row=0, column=0, sticky="w")
-        ttk.Entry(timing, textvariable=self.request_timeout_var, width=8).grid(row=0, column=1, sticky="w")
-        ttk.Label(timing, text="Download timeout (s)").grid(row=0, column=2, sticky="w", padx=(12, 0))
-        ttk.Entry(timing, textvariable=self.download_timeout_var, width=8).grid(row=0, column=3, sticky="w")
-        ttk.Label(timing, text="Poll interval (ms)").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(timing, text="Request timeout (s)", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(timing, textvariable=self.request_timeout_var, width=8).grid(row=0, column=1, sticky="w", padx=(6, 0))
+        ttk.Label(timing, text="Download timeout (s)", style="CardMuted.TLabel").grid(row=0, column=2, sticky="w", padx=(12, 0))
+        ttk.Entry(timing, textvariable=self.download_timeout_var, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
+        ttk.Label(timing, text="Poll interval (ms)", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(timing, textvariable=self.poll_interval_var, width=8).grid(
-            row=1, column=1, sticky="w", pady=(8, 0)
+            row=1, column=1, sticky="w", padx=(6, 0), pady=(8, 0)
         )
-        ttk.Label(timing, text="Poll backoff max (ms)").grid(row=1, column=2, sticky="w", pady=(8, 0), padx=(12, 0))
+        ttk.Label(timing, text="Poll backoff max (ms)", style="CardMuted.TLabel").grid(row=1, column=2, sticky="w", pady=(8, 0), padx=(12, 0))
         ttk.Entry(timing, textvariable=self.poll_backoff_var, width=8).grid(
-            row=1, column=3, sticky="w", pady=(8, 0)
+            row=1, column=3, sticky="w", padx=(6, 0), pady=(8, 0)
         )
 
         # Storage group
-        storage = ttk.Labelframe(self, text="Storage")
+        storage = ttk.Labelframe(body, text="Storage", style="Card.TLabelframe")
         storage.grid(row=3, column=0, sticky="ew", **pad)
         storage.columnconfigure(1, weight=1)
-        ttk.Label(storage, text="Results directory").grid(row=0, column=0, sticky="w")
-        ttk.Entry(storage, textvariable=self.results_dir_var).grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ttk.Label(storage, text="Results directory", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(storage, textvariable=self.results_dir_var).grid(row=0, column=1, sticky="ew", padx=(6, 8))
         ttk.Button(
             storage,
-            text="Choose Results Dir…",
+            text="Choose Directory",
             command=lambda: self._safe(self._on_browse_results_dir),
         ).grid(row=0, column=2, sticky="w")
-        ttk.Label(storage, text="Experiment name").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(storage, text="Experiment name", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Entry(storage, textvariable=self.experiment_name_var).grid(
-            row=1, column=1, sticky="ew", padx=(0, 8), pady=(6, 0)
+            row=1, column=1, sticky="ew", padx=(6, 8), pady=(6, 0)
         )
-        ttk.Label(storage, text="Optional subdirectory").grid(row=2, column=0, sticky="w")
-        ttk.Entry(storage, textvariable=self.subdir_var).grid(row=2, column=1, sticky="ew", padx=(0, 8))
-        ttk.Label(storage, text="Paths are generated on the Box").grid(
+        ttk.Label(storage, text="Optional subdirectory", style="CardMuted.TLabel").grid(
+            row=2, column=0, sticky="w", pady=(10, 0)
+        )
+        ttk.Entry(storage, textvariable=self.subdir_var).grid(
+            row=2, column=1, sticky="ew", padx=(6, 8), pady=(10, 0)
+        )
+        ttk.Label(storage, text="Paths are generated on the Box", style="CardMuted.TLabel").grid(
             row=3, column=0, columnspan=3, sticky="w", pady=(4, 0)
         )
 
         # Package Update group
-        update_pkg = ttk.Labelframe(self, text="Package Update")
+        update_pkg = ttk.Labelframe(body, text="Package Update", style="Card.TLabelframe")
         update_pkg.grid(row=4, column=0, sticky="ew", **pad)
         update_pkg.columnconfigure(1, weight=1)
-        ttk.Label(update_pkg, text="Update package (.zip)").grid(row=0, column=0, sticky="w")
+        ttk.Label(update_pkg, text="Update package (.zip)", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Entry(update_pkg, textvariable=self.update_package_path_var).grid(
-            row=0, column=1, sticky="ew", padx=(0, 8)
+            row=0, column=1, sticky="ew", padx=(6, 8)
         )
         ttk.Button(
             update_pkg,
             text="Browse…",
             command=lambda: self._safe(self._on_browse_update_package),
         ).grid(row=0, column=2, sticky="w")
-        update_actions = ttk.Frame(update_pkg)
+        update_actions = ttk.Frame(update_pkg, style="CardPlain.TFrame")
         update_actions.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Button(
             update_actions,
@@ -204,7 +235,7 @@ class SettingsDialog(tk.Toplevel):
             text="Refresh Version",
             command=lambda: self._safe(self._on_refresh_versions),
         ).pack(side="left", padx=(8, 0))
-        ttk.Label(update_pkg, text="Returned info per box").grid(
+        ttk.Label(update_pkg, text="Returned info per box", style="CardMuted.TLabel").grid(
             row=2, column=0, sticky="w", pady=(8, 0)
         )
         self.version_info_var = tk.StringVar(value="")
@@ -216,7 +247,7 @@ class SettingsDialog(tk.Toplevel):
         self._version_info_entry.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 0))
 
         # NAS group
-        nas = ttk.Labelframe(self, text="NAS")
+        nas = ttk.Labelframe(body, text="NAS", style="Card.TLabelframe")
         nas.grid(row=5, column=0, sticky="ew", **pad)
         ttk.Button(
             nas,
@@ -225,27 +256,87 @@ class SettingsDialog(tk.Toplevel):
         ).pack(side="left")
 
         # Flags
-        flags = ttk.Frame(self)
+        flags = ttk.Labelframe(body, text="Flags", style="Card.TLabelframe")
         flags.grid(row=6, column=0, sticky="ew", **pad)
         ttk.Checkbutton(
             flags,
             text="Auto-download results on completion",
             variable=self.auto_download_var,
+            style="Card.TCheckbutton",
         ).pack(side="left")
-        ttk.Checkbutton(flags, text="Use streaming (SSE/WebSocket)", variable=self.use_streaming_var).pack(
-            side="left", padx=(12, 0)
-        )
-        ttk.Checkbutton(flags, text="Enable debug logging", variable=self.debug_logging_var).pack(
-            side="left", padx=(12, 0)
-        )
+        ttk.Checkbutton(
+            flags, text="Use streaming (SSE/WebSocket)", variable=self.use_streaming_var, style="Card.TCheckbutton"
+        ).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(
+            flags, text="Enable debug logging", variable=self.debug_logging_var, style="Card.TCheckbutton"
+        ).pack(side="left", padx=(12, 0))
 
-        # Footer
+        # Footer: gridded on self directly (not inside the scroll host), so
+        # Save/Close stay visible and reachable no matter how far the body
+        # is scrolled.
+        # Close on the far left, Save on the far right: opposite corners of
+        # the footer, not packed together on one side, so they read as two
+        # distinct actions instead of a cramped pair.
         footer = ttk.Frame(self)
-        footer.grid(row=7, column=0, sticky="ew", **pad)
-        footer.columnconfigure(0, weight=1)
-        self._btn_save = ttk.Button(footer, text="Save", command=self._emit_save)
-        self._btn_save.pack(side="right", padx=(0, 6))
-        ttk.Button(footer, text="Close", command=self._on_close_clicked).pack(side="right")
+        footer.grid(row=1, column=0, sticky="ew", **pad)
+        ttk.Button(footer, text="Close", command=self._on_close_clicked).pack(side="left")
+        self._btn_save = ttk.Button(footer, text="Save", style="Accent.TButton", command=self._emit_save)
+        # padx=(0, 13): footer sits outside the scroll host, so it doesn't
+        # share the scrollbar's width with the cards above it -- without
+        # this, Save's right edge lands 13px further right than theirs
+        # (measured directly: cards at x=805, Save at x=818).
+        self._btn_save.pack(side="right", padx=(0, 13))
+
+    def _make_scroll_host(self, parent: tk.Widget):
+        """Create a vertically scrollable host: a Canvas + inner Frame, with
+        the inner frame's width kept matched to the canvas so content never
+        needs to scroll sideways too.
+
+        Args:
+            parent: Container that receives the scroll host.
+
+        Returns:
+            (outer, inner): outer is the frame to grid/pack in the layout
+            (contains the canvas + scrollbar); inner is where content goes.
+        """
+        outer = ttk.Frame(parent)
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(outer, highlightthickness=0, bg=view_utils.PAGE_BG)
+        vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vbar.grid(row=0, column=1, sticky="ns")
+
+        inner = ttk.Frame(canvas)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(inner_id, width=event.width)
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+
+        def _on_inner_configure(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_mousewheel(event):
+            delta = -1 * (event.delta // 120) if event.delta else 0
+            canvas.yview_scroll(delta, "units")
+
+        def _bind_wheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_wheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        outer.bind("<Enter>", _bind_wheel)
+        outer.bind("<Leave>", _unbind_wheel)
+
+        return outer, inner
 
     # ------------------------------------------------------------------
     def _emit_save(self) -> None:
@@ -436,13 +527,16 @@ class SettingsDialog(tk.Toplevel):
             py = parent.winfo_rooty()
             pw = parent.winfo_width()
             ph = parent.winfo_height()
-            width = 600
-            height = 700
+            width = 720
+            # ~2/3 of the old 760 height: the scrollbar already makes every
+            # group reachable, so the window itself doesn't need to be tall
+            # enough to show all of them unscrolled.
+            height = 500
             x = px + (pw - width) // 2
             y = py + (ph - height) // 2
             return f"{width}x{height}+{x}+{y}"
         except Exception:
-            return "600x670"
+            return "720x500"
 
     def _safe(self, fn: OnVoid) -> None:
         """Invoke no-arg callback only when provided.
@@ -468,6 +562,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.title("SettingsDialog Demo Host")
     root.geometry("900x700")
+    view_utils.apply_theme(root)
 
     dialog = SettingsDialog(
         root,

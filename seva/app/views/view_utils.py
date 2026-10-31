@@ -104,6 +104,21 @@ def apply_theme(root: tk.Misc) -> None:
     style.configure(
         "Card.TLabelframe.Label", background=CARD_BG, foreground=TEXT, font=BOLD_FONT,
     )
+    # Active variant: same border width as Card.TLabelframe (only the
+    # color changes) so a card's size never shifts when its "Run ..."
+    # checkbox is toggled -- same constant-width/color-only convention
+    # the well grid styles use for their selected state.
+    style.configure(
+        "CardActive.TLabelframe",
+        background=CARD_BG,
+        bordercolor=ACCENT,
+        relief="solid",
+        borderwidth=1,
+        padding=10,
+    )
+    style.configure(
+        "CardActive.TLabelframe.Label", background=CARD_BG, foreground=TEXT, font=BOLD_FONT,
+    )
     style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT)
     style.configure("CardMuted.TLabel", background=CARD_BG, foreground=TEXT_MUTED, font=SMALL_FONT)
     style.configure("Card.TCheckbutton", background=CARD_BG, foreground=TEXT, font=BOLD_FONT)

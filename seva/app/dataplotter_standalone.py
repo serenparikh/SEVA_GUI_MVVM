@@ -10,6 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+from seva.app.views import view_utils
+
 # Legacy .data pipeline imports (no longer required for CSV workflow).
 # Wrapped in try/except to avoid hard dependency when running CSV-only.
 try:
@@ -110,6 +112,10 @@ def DataProcessingGUI(master=None):
     # Global selection (0 = all)
     global selected_section_id
     selected_section_id = 0
+
+    # Maps the section combobox's display text -> Cycle id; rebuilt by
+    # update_section_dropdown() each time a new CSV is loaded.
+    section_dict: dict = {}
 
     # CSV header mapper: map common export headers to internal canonical names
     CSV_COLUMN_MAPPER = {
@@ -258,24 +264,9 @@ def DataProcessingGUI(master=None):
         if not options:
             options = list(df_source.columns)
 
-        def rebuild(menu_widget, tk_var, values):
-            """Rebuild a Tk option-menu with new values.
-
-            Args:
-                menu_widget: Tk option-menu widget.
-                tk_var: Bound Tk variable.
-                values: New option labels.
-            """
-            menu_widget['menu'].delete(0, 'end')
-            for v in values:
-                menu_widget['menu'].add_command(
-                    label=v,
-                    command=tk._setit(tk_var, v, lambda *_: update_plot())
-                )
-
-        rebuild(x_menu, x_axis_var, options)
-        rebuild(y_menu, y_axis_var, options)
-        rebuild(secondary_y_menu, secondary_y_axis_var, options)
+        x_menu.configure(values=options)
+        y_menu.configure(values=options)
+        secondary_y_menu.configure(values=options)
 
         # Apply sensible defaults if available
         if x_axis_var.get() not in options:
@@ -291,6 +282,7 @@ def DataProcessingGUI(master=None):
         Args:
             df_source: Dataframe currently loaded in the GUI.
         """
+        nonlocal section_dict
         global selected_section_id
 
         section_dict = {}
@@ -303,26 +295,20 @@ def DataProcessingGUI(master=None):
             section_dict["All data"] = 0
 
         section_options = list(section_dict.keys())
+        section_menu.configure(values=section_options)
         section_var.set(section_options[0])
-        section_menu['menu'].delete(0, 'end')
-
-        def on_section_select(display_text):
-            """Apply selected section id and refresh plot.
-
-            Args:
-                display_text: Selected section display label.
-            """
-            global selected_section_id
-            selected_section_id = section_dict[display_text]
-            update_plot()
-
-        for display_text in section_options:
-            section_menu['menu'].add_command(
-                label=display_text,
-                command=tk._setit(section_var, display_text, lambda dt=display_text: on_section_select(dt))
-            )
 
         selected_section_id = 0
+
+    def on_section_selected(event=None):
+        """Apply the newly chosen section id and refresh the plot.
+
+        Args:
+            event: Tk ``<<ComboboxSelected>>`` event (unused).
+        """
+        global selected_section_id
+        selected_section_id = section_dict.get(section_var.get(), 0)
+        update_plot()
 
     def select_directory():
         """
@@ -440,8 +426,13 @@ def DataProcessingGUI(master=None):
                 if log_x:
                     ax.set_xscale('log')
 
+                # #F3822F matches the main window's Start button accent
+                # color (seva.app.views.view_utils.ACCENT) for a consistent
+                # brand color across the app; this file stays dependency-free
+                # from the rest of the view layer, so the hex is just
+                # hardcoded to match rather than imported.
                 ax.plot(df_cleaned[col1], df_cleaned[col2], marker='o', linestyle='-', markersize=2,
-                        color='#C7DDFF', label=col2)
+                        color='#F3822F', label=col2)
 
                 ax.axhline(0, color="#DEDEDE", linewidth=1.2, linestyle='--')
                 ax.axvline(0, color="#DEDEDE", linewidth=1.2, linestyle='--')
@@ -504,26 +495,26 @@ def DataProcessingGUI(master=None):
         for widget in plot_frame.winfo_children():
             widget.destroy()
 
-        sub_plot_frame = tk.Frame(plot_frame)
+        sub_plot_frame = ttk.Frame(plot_frame, style="CardPlain.TFrame")
         sub_plot_frame.pack(expand=True, fill=tk.BOTH)
 
-        button_frame = tk.Frame(sub_plot_frame, bg='white')
+        button_frame = ttk.Frame(sub_plot_frame, style="CardPlain.TFrame")
         button_frame.pack(fill=tk.X)
 
         # IR Correct button (reintroduced)
-        ir_correct_button = tk.Button(
-            button_frame, text="IR Correct", bg='white',
+        ir_correct_button = ttk.Button(
+            button_frame, text="IR Correct",
             command=lambda: IRCorrect(df_in, path_label.full_path, col1, col2)
         )
         ir_correct_button.pack(pady=(20, 0), padx=20, side=tk.RIGHT)
 
-        save_csv_button = tk.Button(
-            button_frame, text="Save .csv", bg='white',
+        save_csv_button = ttk.Button(
+            button_frame, text="Save .csv",
             command=lambda: data_to_CSV(path_label.full_path)
         )
         save_csv_button.pack(pady=(20, 0), padx=20, side=tk.LEFT)
 
-        graph_frame = tk.Frame(sub_plot_frame)
+        graph_frame = ttk.Frame(sub_plot_frame, style="CardPlain.TFrame")
         graph_frame.pack(side=tk.BOTTOM, expand=True, fill=tk.BOTH)
 
         canvas = FigureCanvasTkAgg(fig, master=graph_frame)
@@ -707,11 +698,8 @@ def DataProcessingGUI(master=None):
 
     root.title("SEVA Data Processing")
     root.geometry("900x750")
-    root.configure(bg='white')
-
-    style = ttk.Style()
-    style.configure('White.TLabelframe', background='white')
-    style.configure('White.TLabelframe.Label', background='white')
+    root.configure(bg=view_utils.PAGE_BG)
+    view_utils.apply_theme(root)
 
     root.grid_rowconfigure(1, weight=1)
     root.grid_columnconfigure(0, weight=1)
@@ -721,99 +709,113 @@ def DataProcessingGUI(master=None):
     global span_selector_enabled
     span_selector_enabled = tk.BooleanVar()
 
-    user_input_frame = ttk.LabelFrame(root, text="Fetch Data", style='White.TLabelframe')
+    user_input_frame = ttk.LabelFrame(root, text="Fetch Data", style='Card.TLabelframe')
     user_input_frame.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=10, pady=10)
 
-    input_frame = tk.Frame(user_input_frame, padx=10, pady=10, bg='white')
+    input_frame = ttk.Frame(user_input_frame, style="CardPlain.TFrame")
     input_frame.grid(row=0, column=0, sticky="w")
 
-    file_frame = tk.Frame(input_frame, bg='white')
+    file_frame = ttk.Frame(input_frame, style="CardPlain.TFrame")
     file_frame.grid(row=0, column=0, pady=5, sticky="w")
 
-    select_button = tk.Button(file_frame, text="Select .csv file", command=select_directory, bg='white')
+    select_button = ttk.Button(file_frame, text="Select .csv file", command=select_directory, style="Accent.TButton")
     select_button.grid(row=0, column=0, padx=5)
 
-    path_label = tk.Entry(file_frame, state='readonly', width=20, bg='white')
+    path_label = ttk.Entry(file_frame, state='readonly', width=13)
     path_label.grid(row=0, column=1, padx=5)
     path_label.full_path = ""
 
-    section_frame = tk.Frame(input_frame, bg='white')
+    section_frame = ttk.Frame(input_frame, style="CardPlain.TFrame")
     section_frame.grid(row=1, column=0, pady=5, sticky="w")
     section_var = tk.StringVar(root)
-    section_menu = tk.OptionMenu(section_frame, section_var, 'All data')
-    section_menu.config(bg='white', fg='black')
+    section_menu = ttk.Combobox(section_frame, textvariable=section_var, values=["All data"], state="readonly", width=11)
     section_menu.grid(row=0, column=1, padx=5, pady=2)
+    section_menu.bind("<<ComboboxSelected>>", on_section_selected)
 
-    axes_frame = ttk.LabelFrame(root, text="Axes", style='White.TLabelframe')
+    axes_frame = ttk.LabelFrame(root, text="Axes", style='Card.TLabelframe')
     axes_frame.grid(row=0, column=1, columnspan=1, sticky="nsew", padx=10, pady=10)
 
-    axes_input_frame = tk.Frame(axes_frame, padx=10, pady=10, bg='white')
+    axes_input_frame = ttk.Frame(axes_frame, style="CardPlain.TFrame")
     axes_input_frame.grid(row=0, column=0, sticky="w")
 
     # Initial placeholder options (will be rebuilt after CSV load)
     variable_options = ['Time', 'Voltage', 'Current']
 
-    x_axis_frame = tk.Frame(axes_input_frame, bg='white')
+    x_axis_frame = ttk.Frame(axes_input_frame, style="CardPlain.TFrame")
     x_axis_frame.grid(row=0, column=0, pady=5, sticky="w")
-    tk.Label(x_axis_frame, text="X-axis:", bg='white').grid(row=0, column=0, padx=(5, 15))
+    ttk.Label(x_axis_frame, text="X-axis:", style="CardMuted.TLabel").grid(row=0, column=0, padx=(5, 8))
     x_axis_var = tk.StringVar(root)
     x_axis_var.set(variable_options[0])
-    x_menu = tk.OptionMenu(x_axis_frame, x_axis_var, *variable_options, command=lambda _: update_plot())
-    x_menu.config(bg='white', fg='black')
+    x_menu = ttk.Combobox(x_axis_frame, textvariable=x_axis_var, values=variable_options, state="readonly", width=7)
     x_menu.grid(row=0, column=1, padx=5)
+    x_menu.bind("<<ComboboxSelected>>", lambda _: update_plot())
 
-    y_axis_frame = tk.Frame(axes_input_frame, bg='white')
+    y_axis_frame = ttk.Frame(axes_input_frame, style="CardPlain.TFrame")
     y_axis_frame.grid(row=0, column=1, pady=5, sticky="e")
-    tk.Label(y_axis_frame, text="Y-axis:", bg='white').grid(row=0, column=0, padx=(30, 15))
+    ttk.Label(y_axis_frame, text="Y-axis:", style="CardMuted.TLabel").grid(row=0, column=0, padx=(15, 8))
     y_axis_var = tk.StringVar(root)
     y_axis_var.set(variable_options[0])
-    y_menu = tk.OptionMenu(y_axis_frame, y_axis_var, *variable_options, command=lambda _: update_plot())
-    y_menu.config(bg='white', fg='black')
+    y_menu = ttk.Combobox(y_axis_frame, textvariable=y_axis_var, values=variable_options, state="readonly", width=7)
     y_menu.grid(row=0, column=1, padx=5)
+    y_menu.bind("<<ComboboxSelected>>", lambda _: update_plot())
 
-    secondary_y_axis_frame = tk.Frame(axes_input_frame, bg='white')
+    secondary_y_axis_frame = ttk.Frame(axes_input_frame, style="CardPlain.TFrame")
     secondary_y_axis_frame.grid(row=1, column=1, pady=5, sticky="e")
-    tk.Label(secondary_y_axis_frame, text="Y2-axis:", bg='white').grid(row=0, column=0, padx=(30, 15))
+    ttk.Label(secondary_y_axis_frame, text="Y2-axis:", style="CardMuted.TLabel").grid(row=0, column=0, padx=(15, 8))
     secondary_y_axis_var = tk.StringVar(root)
     secondary_y_axis_var.set(variable_options[0])
-    secondary_y_menu = tk.OptionMenu(secondary_y_axis_frame, secondary_y_axis_var, *variable_options,
-                                     command=lambda _: update_plot())
-    secondary_y_menu.config(bg='white', fg='black')
+    secondary_y_menu = ttk.Combobox(
+        secondary_y_axis_frame, textvariable=secondary_y_axis_var, values=variable_options,
+        state="readonly", width=7,
+    )
     secondary_y_menu.grid(row=0, column=1, padx=5)
+    secondary_y_menu.bind("<<ComboboxSelected>>", lambda _: update_plot())
+
+    checks_frame = ttk.Frame(axes_input_frame, style="CardPlain.TFrame")
+    checks_frame.grid(row=1, column=0, pady=5, sticky="w")
 
     log_x_var = tk.BooleanVar()
-    log_check = tk.Checkbutton(axes_input_frame, text="Log X", variable=log_x_var, command=lambda: update_plot(),
-                               bg='white')
-    log_check.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    log_check = ttk.Checkbutton(
+        checks_frame, text="Log X", variable=log_x_var, command=lambda: update_plot(),
+        style="Card.TCheckbutton",
+    )
+    log_check.grid(row=0, column=0, padx=(5, 12))
 
     y2_enabled_var = tk.BooleanVar()
-    y2_check = tk.Checkbutton(axes_input_frame, text="Show Y2", variable=y2_enabled_var, command=lambda: update_plot(),
-                              bg='white')
-    y2_check.grid(row=1, column=0, padx=5, pady=5, sticky="e")
+    y2_check = ttk.Checkbutton(
+        checks_frame, text="Show Y2", variable=y2_enabled_var, command=lambda: update_plot(),
+        style="Card.TCheckbutton",
+    )
+    y2_check.grid(row=0, column=1, padx=(0, 5))
 
     # Integration Frame
-    new_frame = ttk.LabelFrame(root, text="Integration", style='White.TLabelframe')
+    new_frame = ttk.LabelFrame(root, text="Integration", style='Card.TLabelframe')
     new_frame.grid(row=0, column=2, columnspan=1, sticky="nsew", padx=10, pady=10)
 
-    options_frame = tk.Frame(new_frame, padx=10, pady=10, bg='white')
+    options_frame = ttk.Frame(new_frame, style="CardPlain.TFrame")
     options_frame.grid(row=0, column=0, sticky="ew")
 
-    span_check = tk.Checkbutton(options_frame, text="Integrate Current", variable=span_selector_enabled,
-                                command=update_plot, bg='white')
-    span_check.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+    span_check = ttk.Checkbutton(
+        options_frame, text="Integrate Current", variable=span_selector_enabled,
+        command=update_plot, style="Card.TCheckbutton",
+    )
+    span_check.grid(row=0, column=0, columnspan=4, padx=5, pady=5, sticky="w")
 
-    # xmin / xmax entries
-    tk.Label(options_frame, text="xmin:", bg='white').grid(row=1, column=0, padx=5, pady=5, sticky="w")
-    xmin_entry = tk.Entry(options_frame, bg='white', width=10)
-    xmin_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+    # xmin / xmax entries share a single row so the frame stays two lines tall.
+    xrange_frame = ttk.Frame(options_frame, style="CardPlain.TFrame")
+    xrange_frame.grid(row=1, column=0, columnspan=4, sticky="w")
+
+    ttk.Label(xrange_frame, text="xmin:", style="CardMuted.TLabel").grid(row=0, column=0, padx=(5, 5), pady=5, sticky="w")
+    xmin_entry = ttk.Entry(xrange_frame, width=7)
+    xmin_entry.grid(row=0, column=1, padx=(0, 12), pady=5, sticky="w")
     xmin_entry.bind("<Return>", zoom_plot)
 
-    tk.Label(options_frame, text="xmax:", bg='white').grid(row=2, column=0, padx=5, pady=5, sticky="w")
-    xmax_entry = tk.Entry(options_frame, bg='white', width=10)
-    xmax_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+    ttk.Label(xrange_frame, text="xmax:", style="CardMuted.TLabel").grid(row=0, column=2, padx=(0, 5), pady=5, sticky="w")
+    xmax_entry = ttk.Entry(xrange_frame, width=7)
+    xmax_entry.grid(row=0, column=3, padx=(0, 5), pady=5, sticky="w")
     xmax_entry.bind("<Return>", zoom_plot)
 
-    plot_frame = ttk.LabelFrame(root, text="Plot", style='White.TLabelframe')
+    plot_frame = ttk.LabelFrame(root, text="Plot", style='Card.TLabelframe')
     plot_frame.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=10, pady=0)
 
     plot_frame.grid_rowconfigure(0, weight=1)
