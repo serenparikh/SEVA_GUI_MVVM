@@ -58,19 +58,27 @@ class MainWindowView(tk.Tk):
 
         # ---- Window basics ----
         self.title("SEVA – Schindler Electrolysis and Voltammetry Analysis")
-        # Fixed 740x875: width is pinned (minsize/maxsize width both 740)
+        # Fixed 760x875: width is pinned (minsize/maxsize width both 760)
         # since the whole layout -- Plate width, the experiment panel's
-        # card widths, and the status rail's 267px -- is tuned to exactly
-        # fill it (see PLATE_WIDTH below). A wider window would just leave
-        # a visible gap to the right of the status rail.
+        # card widths, and the status rail's 267px -- is tuned to fit it
+        # (see PLATE_WIDTH below). A wider window just leaves a harmless
+        # gap to the right of the status rail (body's columns have no grid
+        # weight, so extra width is never distributed into a visible seam
+        # between cards).
+        # 760, not 740: at exactly 740 the body row (Plate/experiment panel/
+        # status rail) has only ~5px of margin on this machine, and on a
+        # machine where "Segoe UI" renders a few px wider per label/button
+        # (observed: the status rail's right edge clipped by the window,
+        # its own right border never visible) that margin disappears
+        # entirely. 760 keeps ~20px of slack so the rail can't get clipped.
         # WINDOW_X/WINDOW_Y: pixel position (from the screen's top-left) the
         # window opens at. Tune these to place it wherever you want on
-        # screen; they don't affect the fixed 740x875 size above.
+        # screen; they don't affect the fixed 760x875 size above.
         WINDOW_X = 100
         WINDOW_Y = 25
-        self.geometry(f"740x875+{WINDOW_X}+{WINDOW_Y}")
-        self.minsize(740, 600)
-        self.maxsize(740, 875)
+        self.geometry(f"760x875+{WINDOW_X}+{WINDOW_Y}")
+        self.minsize(750, 600)
+        self.maxsize(750, 875)
         view_utils.apply_theme(self)
         self.configure(bg=view_utils.PAGE_BG)
         self._logo_image = view_utils.load_logo_image()
